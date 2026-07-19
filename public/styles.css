@@ -177,6 +177,8 @@ button { cursor: pointer; }
 .modal h2 { margin: 0; font: 500 22px Georgia, serif; }
 .icon-button { width: 30px; height: 30px; border-radius: 8px; color: var(--muted); background: #f3f1f5; font-size: 20px; }
 .modal label { display: grid; gap: 6px; color: #656273; font-size: 10px; font-weight: 650; }
+.integration-hint { margin: 4px 0 8px; padding: 12px; border-radius: 10px; background: #fff4d8; color: #71530b; font-size: 13px; line-height: 1.45; }
+.integration-hint code { font-weight: 800; }
 .modal input, .modal select, .modal textarea { width: 100%; padding: 10px 11px; border: 1px solid #ddd9e5; border-radius: 9px; outline: 0; color: var(--ink); background: #fff; font-size: 11px; }
 .modal input:focus, .modal select:focus, .modal textarea:focus { border-color: #a99ef1; box-shadow: 0 0 0 3px rgba(108,92,231,.08); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

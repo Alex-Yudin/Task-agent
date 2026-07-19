@@ -3,10 +3,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 export class SecureTokenStore {
-  constructor({ filePath, dpapiScript, platform = process.platform }) {
+  constructor({ filePath, dpapiScript, platform = process.platform, description = "сохранённую авторизацию Google" }) {
     this.filePath = filePath;
     this.dpapiScript = dpapiScript;
     this.platform = platform;
+    this.description = description;
   }
 
   exists() { return fs.existsSync(this.filePath); }
@@ -17,7 +18,7 @@ export class SecureTokenStore {
     if (!stored) return null;
     const json = this.platform === "win32" ? this.dpapi("unprotect", stored) : stored;
     try { return JSON.parse(json.replace(/^\uFEFF/u, "")); }
-    catch { throw new Error("Не удалось прочитать сохранённую авторизацию Google"); }
+    catch { throw new Error(`Не удалось прочитать ${this.description}`); }
   }
 
   save(value) {

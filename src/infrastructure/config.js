@@ -24,6 +24,7 @@ export function loadConfig(rootDirectory) {
     googleOAuth: {
       enabled: raw.googleOAuth?.enabled !== false,
       clientId: String(raw.googleOAuth?.clientId || "").trim(),
+      clientCredentialsFile: path.resolve(rootDirectory, raw.googleOAuth?.clientCredentialsFile || "data/google-oauth-client.dat"),
       redirectUri: raw.googleOAuth?.redirectUri || `http://127.0.0.1:${raw.port || 3765}/api/google/oauth/callback`,
       tokenFile: path.resolve(rootDirectory, raw.googleOAuth?.tokenFile || "data/google-oauth-tokens.dat"),
       spreadsheetFile: path.resolve(rootDirectory, raw.googleOAuth?.spreadsheetFile || "data/google-oauth-spreadsheet.json"),
