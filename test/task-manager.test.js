@@ -228,7 +228,7 @@ test("выполняет Desktop OAuth через PKCE и локальные Cli
   const oauth = new GoogleOAuthService({
     config: { googleOAuth: {
       enabled: true,
-      clientId: "desktop-client.apps.googleusercontent.com",
+      clientId: "old-desktop-client.apps.googleusercontent.com",
       redirectUri: "http://127.0.0.1:3765/api/google/oauth/callback"
     } },
     tokenStore,
@@ -250,12 +250,14 @@ test("выполняет Desktop OAuth через PKCE и локальные Cli
 
   const started = oauth.begin();
   const authorizationUrl = new URL(started.authorizationUrl);
+  assert.equal(authorizationUrl.searchParams.get("client_id"), "desktop-client.apps.googleusercontent.com");
   assert.equal(authorizationUrl.searchParams.get("code_challenge_method"), "S256");
   assert.ok(authorizationUrl.searchParams.get("code_challenge"));
   assert.equal(authorizationUrl.searchParams.get("client_secret"), null);
 
   const result = await oauth.complete({ code: "authorization-code", state: authorizationUrl.searchParams.get("state") });
   const tokenBody = requests[0].options.body;
+  assert.equal(tokenBody.get("client_id"), "desktop-client.apps.googleusercontent.com");
   assert.ok(tokenBody.get("code_verifier"));
   assert.equal(tokenBody.get("client_secret"), "local-client-secret");
   assert.equal(result.account.email, "user@example.com");

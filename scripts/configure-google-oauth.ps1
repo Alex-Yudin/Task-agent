@@ -33,13 +33,6 @@ if ([string]::IsNullOrWhiteSpace([string]$Client.client_secret)) {
     throw "The selected JSON does not contain client_secret. Download the complete OAuth Client JSON from Google Cloud."
 }
 
-$SettingsPath = Join-Path $RootDirectory "appsettings.json"
-$Settings = [IO.File]::ReadAllText($SettingsPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
-$ExpectedClientId = [string]$Settings.googleOAuth.clientId
-if (-not [string]::IsNullOrWhiteSpace($ExpectedClientId) -and $ExpectedClientId -ne [string]$Client.client_id) {
-    throw "The JSON belongs to another OAuth Client ID. Expected: $ExpectedClientId"
-}
-
 $PlainBytes = [Text.Encoding]::UTF8.GetBytes($Raw)
 $ProtectedBytes = [System.Security.Cryptography.ProtectedData]::Protect(
     $PlainBytes,
