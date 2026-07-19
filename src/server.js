@@ -125,7 +125,7 @@ async function handleApi(request, response, url) {
 
   if (method === "GET" && pathname === "/api/health") {
     return sendJson(response, 200, {
-      status: "ok", version: "0.4.2", storage: "sqlite", androidSync: Boolean(sync),
+      status: "ok", version: "0.4.3", storage: "sqlite", androidSync: Boolean(sync),
       googleSheets: googleSheetsSync.status()
     });
   }

@@ -280,6 +280,16 @@ test("не запускает Google OAuth без локального Client JS
   assert.throws(() => oauth.begin(), error => error.code === "GOOGLE_OAUTH_CLIENT_CREDENTIALS_REQUIRED");
 });
 
+test("загружает Windows-сборку System.Security до обращения к DPAPI", () => {
+  for (const fileName of ["configure-google-oauth.ps1", "dpapi-token.ps1"]) {
+    const source = fs.readFileSync(path.resolve("scripts", fileName), "utf8");
+    const assemblyLoad = source.indexOf("Add-Type -AssemblyName System.Security");
+    const protectedDataUse = source.indexOf("[System.Security.Cryptography.ProtectedData]");
+    assert.ok(assemblyLoad >= 0, `${fileName}: System.Security не загружается`);
+    assert.ok(protectedDataUse > assemblyLoad, `${fileName}: DPAPI используется до загрузки сборки`);
+  }
+});
+
 test("синхронизирует SQLite с Google Sheets API после OAuth", async () => {
   const { service, repository, logger, directory } = setup();
   service.createTask({ title: "Локальная OAuth-задача" });

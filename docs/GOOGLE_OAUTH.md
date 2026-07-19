@@ -1,6 +1,6 @@
 # Google OAuth в «Орбите» для Windows
 
-Версия 0.4.2 использует Desktop OAuth Client и напрямую обращается к Google Sheets API. Публичный Apps Script URL и общий секрет синхронизации для Windows больше не требуются.
+Версия 0.4.3 использует Desktop OAuth Client и напрямую обращается к Google Sheets API. Публичный Apps Script URL и общий секрет синхронизации для Windows больше не требуются.
 
 ## Однократная настройка OAuth Client
 

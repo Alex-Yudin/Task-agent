@@ -5,6 +5,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Security
+$Utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::InputEncoding = $Utf8
+[Console]::OutputEncoding = $Utf8
 $InputText = [Console]::In.ReadToEnd().Trim()
 
 if ($Mode -eq "protect") {
