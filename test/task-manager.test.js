@@ -242,7 +242,7 @@ test("выполняет Desktop OAuth через PKCE и локальные Cli
     fetchImpl: async (url, options = {}) => {
       requests.push({ url, options });
       if (String(url).includes("/token")) {
-        return new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 3600, scope: "openid email" }), { status: 200 });
+        return new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 3600, scope: "openid email https://www.googleapis.com/auth/drive.file" }), { status: 200 });
       }
       return new Response(JSON.stringify({ email: "user@example.com", name: "Пользователь" }), { status: 200 });
     }
@@ -261,6 +261,7 @@ test("выполняет Desktop OAuth через PKCE и локальные Cli
   assert.ok(tokenBody.get("code_verifier"));
   assert.equal(tokenBody.get("client_secret"), "local-client-secret");
   assert.equal(result.account.email, "user@example.com");
+  assert.equal(result.dataAccessGranted, true);
   assert.equal(saved.refreshToken, "refresh-1");
 });
 
@@ -278,6 +279,45 @@ test("не запускает Google OAuth без локального Client JS
   });
 
   assert.throws(() => oauth.begin(), error => error.code === "GOOGLE_OAUTH_CLIENT_CREDENTIALS_REQUIRED");
+});
+
+test("не считает Google подключённым без фактически выданного drive.file", () => {
+  const oauth = new GoogleOAuthService({
+    config: { googleOAuth: { enabled: true, clientId: "desktop-client.apps.googleusercontent.com" } },
+    tokenStore: { load: () => ({ accessToken: "access", scope: "openid email", account: { email: "user@example.com" } }) },
+    credentialsStore: { load: () => ({ installed: { client_id: "desktop-client.apps.googleusercontent.com", client_secret: "secret" } }) },
+    logger: new NullLogger(),
+    environment: {}
+  });
+
+  const status = oauth.status();
+  assert.equal(status.authorized, true);
+  assert.equal(status.dataAccessGranted, false);
+  assert.equal(status.connected, false);
+  assert.match(status.scopeError, /drive\.file/u);
+});
+
+test("отклоняет OAuth callback, если пользователь не выдал drive.file", async () => {
+  let saved = false;
+  const oauth = new GoogleOAuthService({
+    config: { googleOAuth: {
+      enabled: true,
+      clientId: "desktop-client.apps.googleusercontent.com",
+      redirectUri: "http://127.0.0.1:3765/api/google/oauth/callback"
+    } },
+    tokenStore: { load: () => null, save: () => { saved = true; } },
+    credentialsStore: { load: () => ({ installed: { client_id: "desktop-client.apps.googleusercontent.com", client_secret: "secret" } }) },
+    logger: new NullLogger(),
+    environment: {},
+    fetchImpl: async () => new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", scope: "openid email" }), { status: 200 })
+  });
+
+  const started = new URL(oauth.begin().authorizationUrl);
+  await assert.rejects(
+    oauth.complete({ code: "code", state: started.searchParams.get("state") }),
+    error => error.code === "GOOGLE_OAUTH_SCOPE_REQUIRED"
+  );
+  assert.equal(saved, false);
 });
 
 test("загружает Windows-сборку System.Security до обращения к DPAPI", () => {

@@ -5,11 +5,12 @@ const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo";
 const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
+const DATA_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const SCOPES = [
   "openid",
   "email",
   "profile",
-  "https://www.googleapis.com/auth/drive.file"
+  DATA_SCOPE
 ];
 
 function base64Url(value) { return Buffer.from(value).toString("base64url"); }
@@ -32,12 +33,19 @@ export class GoogleOAuthService {
     let error = null;
     try { tokens = this.tokenStore.load(); } catch (loadError) { error = loadError.message; }
     try { credentials = this.credentials(); } catch (credentialsError) { error = credentialsError.message; }
+    const authorized = Boolean(tokens?.refreshToken || tokens?.accessToken);
+    const dataAccessGranted = Boolean(authorized && this.hasDataScope(tokens.scope));
     return {
       enabled: Boolean(this.config.enabled),
       configured: Boolean(this.config.enabled && credentials?.clientId),
       clientSecretConfigured: Boolean(credentials?.clientSecret),
-      connected: Boolean(tokens?.refreshToken || tokens?.accessToken),
+      authorized,
+      dataAccessGranted,
+      connected: Boolean(authorized && dataAccessGranted),
       account: tokens?.account || null,
+      scopeError: authorized && !dataAccessGranted
+        ? "Google подключён без разрешения на файлы Орбиты. Добавьте scope drive.file в Google Cloud и войдите снова"
+        : null,
       error
     };
   }
@@ -93,12 +101,15 @@ export class GoogleOAuthService {
       grant_type: "authorization_code",
       redirect_uri: this.config.redirectUri
     });
+    if (!this.hasDataScope(token.scope)) {
+      throw new DomainError("Google не выдал разрешение drive.file. Добавьте этот scope в Google Auth Platform → Data Access, затем повторите вход и разрешите доступ", "GOOGLE_OAUTH_SCOPE_REQUIRED", 403);
+    }
     const account = await this.userInfo(token.access_token);
     this.tokenStore.save({
       accessToken: token.access_token,
       refreshToken: token.refresh_token || null,
       expiresAt: this.clock().valueOf() + Number(token.expires_in || 3600) * 1000,
-      scope: token.scope || SCOPES.join(" "),
+      scope: token.scope,
       account: { email: account.email, name: account.name || account.email, picture: account.picture || null }
     });
     this.logger.info("google-oauth.connected", { email: account.email });
@@ -108,6 +119,9 @@ export class GoogleOAuthService {
   async accessToken() {
     const stored = this.tokenStore.load();
     if (!stored) throw new DomainError("Войдите через Google", "GOOGLE_OAUTH_REQUIRED", 401);
+    if (!this.hasDataScope(stored.scope)) {
+      throw new DomainError("Google-аккаунт подключён без разрешения drive.file. Войдите снова и разрешите доступ к файлам Орбиты", "GOOGLE_OAUTH_SCOPE_REQUIRED", 403);
+    }
     if (stored.accessToken && Number(stored.expiresAt) > this.clock().valueOf() + 60_000) return stored.accessToken;
     if (!stored.refreshToken) {
       this.tokenStore.clear();
@@ -190,5 +204,9 @@ export class GoogleOAuthService {
       clientId: storedClientId || configuredClientId,
       clientSecret: String(this.environment.ORBITA_GOOGLE_CLIENT_SECRET || source.client_secret || source.clientSecret || "").trim()
     };
+  }
+
+  hasDataScope(value) {
+    return String(value || "").split(/\s+/u).includes(DATA_SCOPE);
   }
 }
