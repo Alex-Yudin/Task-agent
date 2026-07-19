@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17172a">
+  <title>Орбита — ИИ-менеджер задач</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">О</span><span><strong>Орбита</strong><small>ИИ-менеджер задач</small></span></div>
+      <nav class="nav" aria-label="Основная навигация">
+        <button class="nav-item active" data-view="dashboard"><span>◫</span>Обзор</button>
+        <button class="nav-item" data-view="projects"><span>◇</span>Проекты</button>
+        <button class="nav-item" data-view="tasks"><span>✓</span>Задачи</button>
+        <button class="nav-item" data-view="history"><span>◷</span>История</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="storage-state"><i></i><span>Данные хранятся локально</span></div>
+        <button id="backupButton" class="ghost-button">Создать резервную копию</button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="dateLabel"></p>
+          <h1 id="viewTitle">Добрый день</h1>
+        </div>
+        <div class="top-actions">
+          <label class="global-search"><span>⌕</span><input id="searchInput" type="search" placeholder="Поиск по задачам и истории"></label>
+          <button id="newTaskButton" class="primary-button"><span>＋</span>Новая задача</button>
+        </div>
+      </header>
+
+      <section id="content" class="content" aria-live="polite"></section>
+    </main>
+
+    <aside class="assistant-panel">
+      <div class="assistant-head">
+        <div class="assistant-avatar">О</div>
+        <div><strong>Орбита</strong><small><i></i> готова к работе</small></div>
+      </div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <div class="suggestions">
+        <button data-prompt="Создай проект Судебные дела">Создать проект</button>
+        <button data-prompt="Задача: подготовить документы до завтра">Добавить задачу</button>
+        <button data-prompt="План на сегодня">План на сегодня</button>
+      </div>
+      <form id="chatForm" class="chat-form">
+        <textarea id="chatInput" rows="2" maxlength="4000" placeholder="Напишите или продиктуйте команду…"></textarea>
+        <div class="chat-controls">
+          <button type="button" id="voiceButton" class="voice-button" title="Голосовой ввод" aria-label="Голосовой ввод">●</button>
+          <span id="voiceStatus">Enter — отправить</span>
+          <button type="submit" class="send-button" aria-label="Отправить">➜</button>
+        </div>
+      </form>
+    </aside>
+  </div>
+
+  <dialog id="taskDialog" class="modal">
+    <form id="taskForm" method="dialog">
+      <div class="modal-head"><div><p class="eyebrow">НОВАЯ ЗАДАЧА</p><h2>Что нужно сделать?</h2></div><button type="button" class="icon-button close-modal">×</button></div>
+      <label>Название<input name="title" required maxlength="300" placeholder="Например, подготовить претензию"></label>
+      <input name="parentTaskId" type="hidden">
+      <label>Проект<select name="projectId"><option value="">Без проекта</option></select></label>
+      <div class="form-row">
+        <label>Срок<input name="dueAt" type="datetime-local"></label>
+        <label>Приоритет<select name="priority"><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option><option value="low">Низкий</option></select></label>
+      </div>
+      <label>Описание<textarea name="description" rows="3" maxlength="5000"></textarea></label>
+      <div class="modal-actions"><button type="button" class="secondary-button close-modal">Отмена</button><button type="submit" class="primary-button">Добавить задачу</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="projectDialog" class="modal small-modal">
+    <form id="projectForm" method="dialog">
+      <div class="modal-head"><div><p class="eyebrow">НОВЫЙ ПРОЕКТ</p><h2>Создать проект</h2></div><button type="button" class="icon-button close-project-modal">×</button></div>
+      <label>Название<input name="title" required maxlength="200" placeholder="Название проекта"></label>
+      <label>Описание<textarea name="description" rows="3" maxlength="5000"></textarea></label>
+      <div class="modal-actions"><button type="button" class="secondary-button close-project-modal">Отмена</button><button type="submit" class="primary-button">Создать</button></div>
+    </form>
+  </dialog>
+
+  <div id="toastRegion" class="toast-region" aria-live="assertive"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
