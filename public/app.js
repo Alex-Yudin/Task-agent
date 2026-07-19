@@ -22,6 +22,9 @@ const elements = {
   projectDialog: document.querySelector("#projectDialog"),
   projectForm: document.querySelector("#projectForm"),
   googleSheetsState: document.querySelector("#googleSheetsState"),
+  googleDialog: document.querySelector("#googleDialog"),
+  googleAccountStatus: document.querySelector("#googleAccountStatus"),
+  googleSpreadsheetStatus: document.querySelector("#googleSpreadsheetStatus"),
   toastRegion: document.querySelector("#toastRegion")
 };
 
@@ -87,6 +90,39 @@ async function refreshGoogleSheetsStatus() {
     elements.googleSheetsState.querySelector("span").textContent = label;
   } catch {
     elements.googleSheetsState.querySelector("span").textContent = "Google: статус недоступен";
+  }
+}
+
+async function refreshGoogleOAuthStatus() {
+  const status = await api("/api/google/oauth/status");
+  elements.googleAccountStatus.querySelector("span").textContent = status.connected
+    ? `Подключён: ${status.account?.email || "Google-аккаунт"}`
+    : "Google-аккаунт не подключён";
+  elements.googleSpreadsheetStatus.querySelector("span").textContent = status.spreadsheet
+    ? `Таблица: ${status.spreadsheet.title}`
+    : "Таблица не выбрана";
+  document.querySelector("#googleSignInButton").hidden = status.connected;
+  document.querySelector("#googleCreateSheetButton").hidden = !status.connected || Boolean(status.spreadsheet);
+  document.querySelector("#googleUseSheetButton").hidden = !status.connected;
+  document.querySelector("#googleSpreadsheetInput").parentElement.hidden = !status.connected;
+  const openLink = document.querySelector("#googleOpenSheetLink");
+  openLink.hidden = !status.spreadsheet?.url;
+  openLink.href = status.spreadsheet?.url || "#";
+  document.querySelector("#googleDisconnectButton").hidden = !status.connected;
+  return status;
+}
+
+async function waitForGoogleLogin() {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      const status = await refreshGoogleOAuthStatus();
+      if (status.connected) {
+        toast("Google-аккаунт подключён");
+        await refreshGoogleSheetsStatus();
+        return;
+      }
+    } catch {}
   }
 }
 
@@ -424,6 +460,47 @@ document.querySelector("#googleSheetsSyncButton").addEventListener("click", asyn
     await refresh();
   } catch (error) { toast(error.message, "error"); }
 });
+document.querySelector("#googleConnectButton").addEventListener("click", async () => {
+  try {
+    await refreshGoogleOAuthStatus();
+    elements.googleDialog.showModal();
+  } catch (error) { toast(error.message, "error"); }
+});
+document.querySelector("#googleSignInButton").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/google/oauth/start", { method: "POST" });
+    window.open(result.authorizationUrl, "google-oauth", "popup,width=560,height=720");
+    waitForGoogleLogin();
+  } catch (error) { toast(error.message, "error"); }
+});
+document.querySelector("#googleCreateSheetButton").addEventListener("click", async () => {
+  try {
+    toast("Создаём Google Таблицу…");
+    await api("/api/google/oauth/spreadsheet", { method: "POST", body: JSON.stringify({ action: "create", title: "Орбита — задачи" }) });
+    await refreshGoogleOAuthStatus();
+    await refreshGoogleSheetsStatus();
+    toast("Google Таблица создана и подключена");
+  } catch (error) { toast(error.message, "error"); }
+});
+document.querySelector("#googleUseSheetButton").addEventListener("click", async () => {
+  const value = document.querySelector("#googleSpreadsheetInput").value.trim();
+  if (!value) return toast("Вставьте ссылку или ID таблицы", "error");
+  try {
+    await api("/api/google/oauth/spreadsheet", { method: "POST", body: JSON.stringify({ action: "connect", value }) });
+    await refreshGoogleOAuthStatus();
+    await refreshGoogleSheetsStatus();
+    toast("Google Таблица подключена");
+  } catch (error) { toast(error.message, "error"); }
+});
+document.querySelector("#googleDisconnectButton").addEventListener("click", async () => {
+  try {
+    await api("/api/google/oauth/disconnect", { method: "POST" });
+    await refreshGoogleOAuthStatus();
+    await refreshGoogleSheetsStatus();
+    toast("Google-аккаунт отключён");
+  } catch (error) { toast(error.message, "error"); }
+});
+document.querySelectorAll(".close-google-modal").forEach(button => button.addEventListener("click", () => elements.googleDialog.close()));
 document.querySelectorAll(".close-modal").forEach(button => button.addEventListener("click", () => elements.taskDialog.close()));
 document.querySelectorAll(".close-project-modal").forEach(button => button.addEventListener("click", () => elements.projectDialog.close()));
 document.querySelectorAll("[data-prompt]").forEach(button => button.addEventListener("click", () => sendChat(button.dataset.prompt)));
