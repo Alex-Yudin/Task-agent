@@ -11,6 +11,8 @@ import { TaskManagerService } from "../src/application/task-manager-service.js";
 import { BackupService } from "../src/application/backup-service.js";
 import { SyncService } from "../src/application/sync-service.js";
 import { GoogleSheetsSyncService } from "../src/application/google-sheets-sync-service.js";
+import { GoogleOAuthService } from "../src/application/google-oauth-service.js";
+import { GoogleSheetsApiService } from "../src/application/google-sheets-api-service.js";
 import { NotFoundError, ValidationError } from "../src/domain/errors.js";
 
 const resources = [];
@@ -213,4 +215,77 @@ test("обменивается задачами с Google Таблицей и н
   assert.equal(status.tasks, 2);
   assert.equal(status.lastError, null);
   google.close();
+});
+
+test("выполняет Desktop OAuth через PKCE без client secret", async () => {
+  let saved = null;
+  const tokenStore = {
+    load: () => saved,
+    save: value => { saved = value; },
+    clear: () => { saved = null; }
+  };
+  const requests = [];
+  const oauth = new GoogleOAuthService({
+    config: { googleOAuth: {
+      enabled: true,
+      clientId: "desktop-client.apps.googleusercontent.com",
+      redirectUri: "http://127.0.0.1:3765/api/google/oauth/callback"
+    } },
+    tokenStore,
+    logger: new NullLogger(),
+    clock: () => new Date(FIXED_DATE),
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (String(url).includes("/token")) {
+        return new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 3600, scope: "openid email" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ email: "user@example.com", name: "Пользователь" }), { status: 200 });
+    }
+  });
+
+  const started = oauth.begin();
+  const authorizationUrl = new URL(started.authorizationUrl);
+  assert.equal(authorizationUrl.searchParams.get("code_challenge_method"), "S256");
+  assert.ok(authorizationUrl.searchParams.get("code_challenge"));
+  assert.equal(authorizationUrl.searchParams.get("client_secret"), null);
+
+  const result = await oauth.complete({ code: "authorization-code", state: authorizationUrl.searchParams.get("state") });
+  const tokenBody = requests[0].options.body;
+  assert.ok(tokenBody.get("code_verifier"));
+  assert.equal(tokenBody.get("client_secret"), null);
+  assert.equal(result.account.email, "user@example.com");
+  assert.equal(saved.refreshToken, "refresh-1");
+});
+
+test("синхронизирует SQLite с Google Sheets API после OAuth", async () => {
+  const { service, repository, logger, directory } = setup();
+  service.createTask({ title: "Локальная OAuth-задача" });
+  const spreadsheetFile = path.join(directory, "spreadsheet.json");
+  fs.writeFileSync(spreadsheetFile, JSON.stringify({ spreadsheetId: "spreadsheet_12345678901234567890", title: "Орбита", url: "https://example.test/sheet" }));
+  const remoteId = "0ecb64d0-b88d-423b-9931-9be0777bb1b7";
+  let written = null;
+  const api = new GoogleSheetsApiService({
+    config: { googleOAuth: { spreadsheetFile } },
+    oauth: { status: () => ({ connected: true, account: { email: "user@example.com" } }), accessToken: async () => "access" },
+    syncService: new SyncService({ repository, logger, clock: () => new Date(FIXED_DATE) }),
+    logger,
+    clock: () => new Date(FIXED_DATE),
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes("values:batchGet")) {
+        return new Response(JSON.stringify({ valueRanges: [
+          { values: [] },
+          { values: [[remoteId, "", "", "", "Задача из OAuth-таблицы", "", "todo", "high", "", "", "ChatGPT", "2026-07-19T08:00:00.000Z", "2026-07-19T09:00:00.000Z", "Google Sheets", ""]] }
+        ] }), { status: 200 });
+      }
+      if (String(url).includes("values:batchUpdate")) written = JSON.parse(options.body);
+      return new Response(JSON.stringify({}), { status: 200 });
+    }
+  });
+
+  const result = await api.synchronize("test");
+
+  assert.equal(repository.getTask(remoteId).title, "Задача из OAuth-таблицы");
+  assert.equal(result.mode, "oauth");
+  assert.equal(result.tasks, 2);
+  assert.ok(written.data.find(item => item.range === "Tasks!A2:O").values.some(row => row[4] === "Локальная OAuth-задача"));
 });

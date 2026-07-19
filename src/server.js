@@ -11,7 +11,10 @@ import { TaskManagerService } from "./application/task-manager-service.js";
 import { BackupService } from "./application/backup-service.js";
 import { SyncService } from "./application/sync-service.js";
 import { GoogleSheetsSyncService } from "./application/google-sheets-sync-service.js";
+import { GoogleOAuthService } from "./application/google-oauth-service.js";
+import { GoogleSheetsApiService } from "./application/google-sheets-api-service.js";
 import { createSyncServer } from "./infrastructure/sync-server.js";
+import { SecureTokenStore } from "./infrastructure/secure-token-store.js";
 import { DomainError } from "./domain/errors.js";
 
 const rootDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,7 +26,13 @@ const repository = new SqliteRepository(database);
 const analyzer = new RuleBasedDialogueAnalyzer();
 const backupService = new BackupService({ database, backupDirectory: config.backupDirectory, logger });
 const syncService = new SyncService({ repository, logger });
-const googleSheetsSync = new GoogleSheetsSyncService({ config, syncService, logger });
+const googleTokenStore = new SecureTokenStore({
+  filePath: config.googleOAuth.tokenFile,
+  dpapiScript: config.googleOAuth.dpapiScript
+});
+const googleOAuth = new GoogleOAuthService({ config, tokenStore: googleTokenStore, logger });
+const googleSheetsApi = new GoogleSheetsApiService({ config, oauth: googleOAuth, syncService, logger });
+const googleSheetsSync = new GoogleSheetsSyncService({ config, syncService, logger, oauthSheets: googleSheetsApi });
 const service = new TaskManagerService({
   repository, analyzer, author: config.author, logger,
   onChange: () => googleSheetsSync.schedule("local-change")
@@ -62,6 +71,19 @@ function sendStatic(response, route) {
   response.end(content);
 }
 
+function sendHtml(response, status, title, message) {
+  const safe = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const payload = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${safe(title)}</title><style>body{font:16px system-ui;background:#f7f6fa;color:#1e1d2d;display:grid;place-items:center;min-height:100vh;margin:0}.card{max-width:560px;background:white;padding:32px;border-radius:18px;box-shadow:0 12px 40px #3b32631f}h1{color:#5143be}</style></head><body><main class="card"><h1>${safe(title)}</h1><p>${safe(message)}</p><p>Можно закрыть эту вкладку и вернуться в «Орбиту».</p></main></body></html>`;
+  response.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": Buffer.byteLength(payload),
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+    "X-Content-Type-Options": "nosniff"
+  });
+  response.end(payload);
+}
+
 async function readJson(request) {
   let size = 0;
   const chunks = [];
@@ -93,7 +115,7 @@ async function handleApi(request, response, url) {
 
   if (method === "GET" && pathname === "/api/health") {
     return sendJson(response, 200, {
-      status: "ok", version: "0.3.0", storage: "sqlite", androidSync: Boolean(sync),
+      status: "ok", version: "0.4.0", storage: "sqlite", androidSync: Boolean(sync),
       googleSheets: googleSheetsSync.status()
     });
   }
@@ -144,6 +166,37 @@ async function handleApi(request, response, url) {
   }
   if (method === "POST" && pathname === "/api/google-sheets/sync") {
     return sendJson(response, 200, await googleSheetsSync.synchronize("manual"));
+  }
+  if (method === "GET" && pathname === "/api/google/oauth/status") {
+    return sendJson(response, 200, googleSheetsApi.status());
+  }
+  if (method === "POST" && pathname === "/api/google/oauth/start") {
+    return sendJson(response, 200, googleOAuth.begin());
+  }
+  if (method === "GET" && pathname === "/api/google/oauth/callback") {
+    try {
+      const status = await googleOAuth.complete({
+        code: url.searchParams.get("code"),
+        state: url.searchParams.get("state"),
+        error: url.searchParams.get("error")
+      });
+      return sendHtml(response, 200, "Google подключён", `Выполнен вход: ${status.account?.email || "аккаунт Google"}.`);
+    } catch (error) {
+      logger.error("google-oauth.callback-failed", { error: error.message });
+      return sendHtml(response, error.status || 400, "Не удалось подключить Google", error.message);
+    }
+  }
+  if (method === "POST" && pathname === "/api/google/oauth/disconnect") {
+    googleSheetsApi.disconnectSpreadsheet();
+    return sendJson(response, 200, await googleOAuth.disconnect());
+  }
+  if (method === "POST" && pathname === "/api/google/oauth/spreadsheet") {
+    const body = await readJson(request);
+    const spreadsheet = body.action === "connect"
+      ? await googleSheetsApi.connectSpreadsheet(body.value)
+      : await googleSheetsApi.createSpreadsheet(body.title);
+    googleSheetsSync.schedule("spreadsheet-connected", 0);
+    return sendJson(response, 200, { ...googleSheetsApi.status(), spreadsheet });
   }
   return sendJson(response, 404, { error: { code: "NOT_FOUND", message: "Адрес API не найден" } });
 }

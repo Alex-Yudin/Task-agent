@@ -4,12 +4,13 @@ import { DomainError } from "../domain/errors.js";
 const EPOCH = "1970-01-01T00:00:00.000Z";
 
 export class GoogleSheetsSyncService {
-  constructor({ config, syncService, logger, fetchImpl = fetch, clock = () => new Date() }) {
+  constructor({ config, syncService, logger, oauthSheets = null, fetchImpl = fetch, clock = () => new Date() }) {
     this.config = config.googleSheets;
     this.syncService = syncService;
     this.logger = logger;
     this.fetchImpl = fetchImpl;
     this.clock = clock;
+    this.oauthSheets = oauthSheets;
     this.timer = null;
     this.interval = null;
     this.pending = null;
@@ -22,7 +23,8 @@ export class GoogleSheetsSyncService {
       lastError: null,
       lastReason: null,
       projects: 0,
-      tasks: 0
+      tasks: 0,
+      mode: null
     };
     this.refreshConfigured();
   }
@@ -53,7 +55,7 @@ export class GoogleSheetsSyncService {
 
   status() {
     this.refreshConfigured();
-    return { ...this.state };
+    return { ...this.state, oauth: this.oauthSheets?.status() || null };
   }
 
   async synchronize(reason = "manual") {
@@ -64,12 +66,20 @@ export class GoogleSheetsSyncService {
   }
 
   async perform(reason) {
-    const credentials = this.credentials();
     this.state.inProgress = true;
     this.state.lastAttemptAt = this.clock().toISOString();
     this.state.lastReason = reason;
     this.state.lastError = null;
     try {
+      if (this.oauthSheets?.ready()) {
+        const result = await this.oauthSheets.synchronize(reason);
+        this.state.lastSuccessAt = result.serverTime || this.clock().toISOString();
+        this.state.projects = result.projects;
+        this.state.tasks = result.tasks;
+        this.state.mode = "oauth";
+        return this.status();
+      }
+      const credentials = this.credentials();
       const snapshot = this.syncService.pull(EPOCH);
       const response = await this.fetchImpl(credentials.webAppUrl, {
         method: "POST",
@@ -98,6 +108,7 @@ export class GoogleSheetsSyncService {
       this.state.lastSuccessAt = remote.serverTime || this.clock().toISOString();
       this.state.projects = projects.length;
       this.state.tasks = tasks.length;
+      this.state.mode = "apps-script";
       this.logger.info("google-sheets.synchronized", { reason, projects: projects.length, tasks: tasks.length });
       return this.status();
     } catch (error) {
@@ -110,7 +121,7 @@ export class GoogleSheetsSyncService {
   }
 
   refreshConfigured() {
-    this.state.configured = Boolean(this.config.enabled && fs.existsSync(this.config.credentialsFile));
+    this.state.configured = Boolean(this.config.enabled && (this.oauthSheets?.ready() || fs.existsSync(this.config.credentialsFile)));
   }
 
   credentials() {

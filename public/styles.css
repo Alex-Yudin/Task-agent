@@ -181,6 +181,8 @@ button { cursor: pointer; }
 .modal input:focus, .modal select:focus, .modal textarea:focus { border-color: #a99ef1; box-shadow: 0 0 0 3px rgba(108,92,231,.08); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 5px; }
+#googleDialog .primary-button, #googleDialog .secondary-button { width: 100%; text-align: center; text-decoration: none; }
+#googleDialog .storage-state { margin: 0; color: var(--muted); font-size: 10px; }
 
 .toast-region { position: fixed; right: 374px; bottom: 22px; z-index: 20; display: grid; gap: 8px; }
 .toast { min-width: 260px; padding: 11px 14px; border-radius: 10px; color: #fff; background: #27253b; box-shadow: var(--shadow); font-size: 10px; animation: slide-in .2s ease-out; }

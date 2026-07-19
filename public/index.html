@@ -20,6 +20,7 @@
       <div class="sidebar-foot">
         <div class="storage-state"><i></i><span>Локальная база включена</span></div>
         <div id="googleSheetsState" class="storage-state"><i></i><span>Google Таблица не настроена</span></div>
+        <button id="googleConnectButton" class="ghost-button">Аккаунт Google</button>
         <button id="googleSheetsSyncButton" class="ghost-button">Синхронизировать Google</button>
         <button id="backupButton" class="ghost-button">Создать резервную копию</button>
       </div>
@@ -83,6 +84,20 @@
       <label>Название<input name="title" required maxlength="200" placeholder="Название проекта"></label>
       <label>Описание<textarea name="description" rows="3" maxlength="5000"></textarea></label>
       <div class="modal-actions"><button type="button" class="secondary-button close-project-modal">Отмена</button><button type="submit" class="primary-button">Создать</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="googleDialog" class="modal small-modal">
+    <form method="dialog">
+      <div class="modal-head"><div><p class="eyebrow">GOOGLE OAUTH</p><h2>Аккаунт и таблица</h2></div><button type="button" class="icon-button close-google-modal">×</button></div>
+      <div id="googleAccountStatus" class="storage-state"><i></i><span>Проверяем подключение…</span></div>
+      <div id="googleSpreadsheetStatus" class="storage-state"><i></i><span>Таблица не выбрана</span></div>
+      <button type="button" id="googleSignInButton" class="primary-button">Войти через Google</button>
+      <button type="button" id="googleCreateSheetButton" class="secondary-button">Создать таблицу «Орбита»</button>
+      <label>Подключить ранее созданную таблицу<input id="googleSpreadsheetInput" placeholder="Ссылка или Spreadsheet ID"></label>
+      <button type="button" id="googleUseSheetButton" class="secondary-button">Подключить таблицу</button>
+      <a id="googleOpenSheetLink" class="primary-button" target="_blank" rel="noopener" hidden>Открыть Google Таблицу</a>
+      <button type="button" id="googleDisconnectButton" class="text-button" hidden>Отключить Google-аккаунт</button>
     </form>
   </dialog>
 
