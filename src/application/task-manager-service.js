@@ -16,12 +16,13 @@ function dayBounds(clock) {
 }
 
 export class TaskManagerService {
-  constructor({ repository, analyzer, author = "Локальный пользователь", clock = () => new Date(), logger }) {
+  constructor({ repository, analyzer, author = "Локальный пользователь", clock = () => new Date(), logger, onChange = () => {} }) {
     this.repository = repository;
     this.analyzer = analyzer;
     this.author = author;
     this.clock = clock;
     this.logger = logger;
+    this.onChange = onChange;
   }
 
   createProject(input) {
@@ -45,6 +46,7 @@ export class TaskManagerService {
       return result;
     });
     this.logger.info("project.created", { projectId: project.id });
+    this.notifyChanged("project", project.id, "created");
     return created;
   }
 
@@ -59,11 +61,13 @@ export class TaskManagerService {
       if (!/^#[0-9a-f]{6}$/iu.test(input.color)) throw new ValidationError("Некорректный цвет проекта");
       changes.color = input.color;
     }
-    return this.repository.transaction(() => {
+    const updated = this.repository.transaction(() => {
       const updated = this.repository.updateProject(id, changes);
       this.activity("project", id, "updated", changes);
       return updated;
     });
+    this.notifyChanged("project", id, "updated");
+    return updated;
   }
 
   createTask(input) {
@@ -92,6 +96,7 @@ export class TaskManagerService {
       return result;
     });
     this.logger.info("task.created", { taskId: task.id, projectId });
+    this.notifyChanged("task", task.id, "created");
     return created;
   }
 
@@ -122,6 +127,7 @@ export class TaskManagerService {
       return result;
     });
     this.logger.info("task.updated", { taskId: id, changes: Object.keys(changes) });
+    this.notifyChanged("task", id, "updated");
     return updated;
   }
 
@@ -210,6 +216,11 @@ export class TaskManagerService {
     this.repository.addActivity({
       entityType, entityId, action, details, author: this.author, createdAt: nowIso(this.clock)
     });
+  }
+
+  notifyChanged(entityType, entityId, action) {
+    try { this.onChange({ entityType, entityId, action }); }
+    catch (error) { this.logger.error("change.notification.failed", { entityType, entityId, action, error: error.message }); }
   }
 
   taskWord(count) {

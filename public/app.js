@@ -21,6 +21,7 @@ const elements = {
   taskForm: document.querySelector("#taskForm"),
   projectDialog: document.querySelector("#projectDialog"),
   projectForm: document.querySelector("#projectForm"),
+  googleSheetsState: document.querySelector("#googleSheetsState"),
   toastRegion: document.querySelector("#toastRegion")
 };
 
@@ -69,9 +70,24 @@ function toast(message, type = "success") {
 
 async function refresh() {
   state.data = await api("/api/bootstrap");
+  refreshGoogleSheetsStatus();
   populateProjectSelect();
   renderChat();
   render();
+}
+
+async function refreshGoogleSheetsStatus() {
+  try {
+    const status = await api("/api/google-sheets/status");
+    let label = "Google Таблица не настроена";
+    if (status.configured && status.inProgress) label = "Google: синхронизация…";
+    else if (status.configured && status.lastError) label = "Google: требуется внимание";
+    else if (status.configured && status.lastSuccessAt) label = `Google: ${formatDate(status.lastSuccessAt, { time: true })}`;
+    else if (status.configured) label = "Google Таблица подключена";
+    elements.googleSheetsState.querySelector("span").textContent = label;
+  } catch {
+    elements.googleSheetsState.querySelector("span").textContent = "Google: статус недоступен";
+  }
 }
 
 function setHeader(title) {
@@ -398,6 +414,14 @@ document.querySelector("#backupButton").addEventListener("click", async () => {
   try {
     const backup = await api("/api/backups", { method: "POST" });
     toast(`Резервная копия создана: ${backup.fileName}`);
+  } catch (error) { toast(error.message, "error"); }
+});
+document.querySelector("#googleSheetsSyncButton").addEventListener("click", async () => {
+  try {
+    toast("Синхронизация с Google Таблицей запущена");
+    const status = await api("/api/google-sheets/sync", { method: "POST" });
+    toast(`Google Таблица обновлена: ${status.projects} проектов, ${status.tasks} задач`);
+    await refresh();
   } catch (error) { toast(error.message, "error"); }
 });
 document.querySelectorAll(".close-modal").forEach(button => button.addEventListener("click", () => elements.taskDialog.close()));

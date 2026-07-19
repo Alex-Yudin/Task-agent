@@ -30,6 +30,10 @@ final class SyncClient {
         String baseUrl = normalize(rawBaseUrl);
         if (token == null || token.trim().isEmpty()) throw new IllegalArgumentException("Укажите токен синхронизации");
 
+        if (baseUrl.startsWith("https://script.google.com/macros/s/") && baseUrl.endsWith("/exec")) {
+            return synchronizeGoogleSheets(database, baseUrl, token, deviceId);
+        }
+
         JSONObject push = new JSONObject();
         push.put("protocolVersion", 1);
         push.put("deviceId", deviceId);
@@ -44,6 +48,30 @@ final class SyncClient {
         JSONArray taskValues = pull.getJSONArray("tasks");
         database.applyRemote(projectValues, taskValues);
         return new Result(pull.getString("serverTime"), projectValues.length(), taskValues.length());
+    }
+
+    private Result synchronizeGoogleSheets(LocalDatabase database, String url, String secret, String deviceId) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("action", "sync");
+        payload.put("protocolVersion", 1);
+        payload.put("clientId", deviceId);
+        payload.put("secret", secret.trim());
+        payload.put("projects", projects(database.projects()));
+        payload.put("tasks", tasks(database.tasks()));
+        JSONObject result = request("POST", url, secret, payload.toString());
+        if (!result.optBoolean("ok", false)) {
+            String message = result.optJSONObject("error") == null
+                    ? "Google Таблица отклонила синхронизацию"
+                    : result.optJSONObject("error").optString("message", "Ошибка Google Таблицы");
+            throw new IllegalStateException(message);
+        }
+        JSONArray projectValues = result.optJSONArray("projects");
+        JSONArray taskValues = result.optJSONArray("tasks");
+        if (projectValues == null) projectValues = new JSONArray();
+        if (taskValues == null) taskValues = new JSONArray();
+        database.applyRemote(projectValues, taskValues);
+        return new Result(result.optString("serverTime", java.time.Instant.now().toString()),
+                projectValues.length(), taskValues.length());
     }
 
     private JSONArray projects(List<Project> values) throws Exception {
@@ -95,7 +123,7 @@ final class SyncClient {
     }
 
     private String normalize(String value) {
-        if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException("Укажите адрес компьютера");
+        if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException("Укажите адрес синхронизации");
         String result = value.trim();
         while (result.endsWith("/")) result = result.substring(0, result.length() - 1);
         if (!result.startsWith("http://") && !result.startsWith("https://")) result = "http://" + result;
