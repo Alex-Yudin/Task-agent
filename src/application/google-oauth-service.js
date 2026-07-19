@@ -186,9 +186,6 @@ export class GoogleOAuthService {
     const source = stored.installed || stored.web || stored;
     const configuredClientId = String(this.config.clientId || "").trim();
     const storedClientId = String(source.client_id || source.clientId || "").trim();
-    if (configuredClientId && storedClientId && configuredClientId !== storedClientId) {
-      throw new DomainError("Выбран OAuth Client JSON от другого Client ID", "GOOGLE_OAUTH_CLIENT_ID_MISMATCH", 409);
-    }
     return {
       clientId: storedClientId || configuredClientId,
       clientSecret: String(this.environment.ORBITA_GOOGLE_CLIENT_SECRET || source.client_secret || source.clientSecret || "").trim()
