@@ -9,6 +9,7 @@ import { NullLogger } from "../src/infrastructure/logger.js";
 import { RuleBasedDialogueAnalyzer } from "../src/application/dialogue-analyzer.js";
 import { TaskManagerService } from "../src/application/task-manager-service.js";
 import { BackupService } from "../src/application/backup-service.js";
+import { SyncService } from "../src/application/sync-service.js";
 import { NotFoundError, ValidationError } from "../src/domain/errors.js";
 
 const resources = [];
@@ -134,4 +135,32 @@ test("создаёт консистентную резервную копию SQ
   const backupRepository = new SqliteRepository(backupDatabase);
   assert.equal(backupRepository.listTasks().length, 1);
   backupDatabase.close();
+});
+
+test("синхронизирует Android-проект и задачу по правилу последнего изменения", () => {
+  const { repository, logger } = setup();
+  const sync = new SyncService({ repository, logger, clock: () => new Date(FIXED_DATE) });
+  const projectId = "2eb16e37-a741-4a63-8eae-f1d8e8f63e5a";
+  const taskId = "2d32e22b-5d60-44b0-aa5f-7629e66c94cf";
+  const createdAt = "2026-07-18T08:00:00.000Z";
+
+  const first = sync.push({
+    deviceId: "android-test",
+    projects: [{ id: projectId, title: "Мобильный проект", status: "active", color: "#6C5CE7", author: "Android", createdAt, updatedAt: createdAt }],
+    tasks: [{ id: taskId, projectId, title: "Задача с телефона", status: "todo", priority: "high", author: "Android", createdAt, updatedAt: createdAt }]
+  });
+  assert.deepEqual(first.applied, { projects: 1, tasks: 1 });
+
+  const stale = sync.push({
+    deviceId: "android-test",
+    projects: [],
+    tasks: [{ id: taskId, projectId, title: "Устаревшее название", status: "todo", priority: "normal", author: "Android", createdAt, updatedAt: "2026-07-17T08:00:00.000Z" }]
+  });
+  assert.deepEqual(stale.applied, { projects: 0, tasks: 0 });
+  assert.equal(repository.getTask(taskId).title, "Задача с телефона");
+
+  const pull = sync.pull("1970-01-01T00:00:00.000Z");
+  assert.equal(pull.projects.length, 1);
+  assert.equal(pull.tasks.length, 1);
+  assert.equal(pull.protocolVersion, 1);
 });

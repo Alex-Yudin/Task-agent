@@ -3,4 +3,8 @@ backups/
 node_modules/
 *.log
 .DS_Store
-
+.gradle/
+**/build/
+local.properties
+*.jks
+*.keystore

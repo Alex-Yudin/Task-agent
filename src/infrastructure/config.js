@@ -8,6 +8,12 @@ export function loadConfig(rootDirectory) {
     ...raw,
     rootDirectory,
     dataDirectory: path.resolve(rootDirectory, raw.dataDirectory),
-    backupDirectory: path.resolve(rootDirectory, raw.backupDirectory)
+    backupDirectory: path.resolve(rootDirectory, raw.backupDirectory),
+    sync: {
+      enabled: raw.sync?.enabled !== false,
+      host: raw.sync?.host || "0.0.0.0",
+      port: raw.sync?.port || 3766,
+      tokenFile: path.resolve(rootDirectory, raw.sync?.tokenFile || "data/sync-token.txt")
+    }
   };
 }

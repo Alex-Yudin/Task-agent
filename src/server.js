@@ -9,6 +9,8 @@ import { SqliteRepository } from "./infrastructure/sqlite-repository.js";
 import { RuleBasedDialogueAnalyzer } from "./application/dialogue-analyzer.js";
 import { TaskManagerService } from "./application/task-manager-service.js";
 import { BackupService } from "./application/backup-service.js";
+import { SyncService } from "./application/sync-service.js";
+import { createSyncServer } from "./infrastructure/sync-server.js";
 import { DomainError } from "./domain/errors.js";
 
 const rootDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -20,6 +22,8 @@ const repository = new SqliteRepository(database);
 const analyzer = new RuleBasedDialogueAnalyzer();
 const service = new TaskManagerService({ repository, analyzer, author: config.author, logger });
 const backupService = new BackupService({ database, backupDirectory: config.backupDirectory, logger });
+const syncService = new SyncService({ repository, logger });
+const sync = createSyncServer({ config, syncService, logger });
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -83,7 +87,7 @@ async function handleApi(request, response, url) {
   const pathname = url.pathname;
 
   if (method === "GET" && pathname === "/api/health") {
-    return sendJson(response, 200, { status: "ok", version: "0.1.0", storage: "sqlite" });
+    return sendJson(response, 200, { status: "ok", version: "0.2.0", storage: "sqlite", androidSync: Boolean(sync) });
   }
   if (method === "GET" && pathname === "/api/bootstrap") {
     return sendJson(response, 200, service.bootstrap());
@@ -154,12 +158,25 @@ server.listen(config.port, config.host, () => {
   console.log(`ИИ-менеджер задач запущен: http://${config.host}:${config.port}`);
 });
 
+if (sync) {
+  sync.server.listen(config.sync.port, config.sync.host, () => {
+    logger.info("sync.started", { host: config.sync.host, port: config.sync.port, tokenFile: sync.tokenFile });
+    console.log(`Синхронизация Android: порт ${config.sync.port}; токен: ${sync.tokenFile}`);
+  });
+}
+
 function shutdown(signal) {
   logger.info("application.stopping", { signal });
-  server.close(() => {
-    database.close();
-    process.exit(0);
-  });
+  let pending = sync ? 2 : 1;
+  const closed = () => {
+    pending -= 1;
+    if (pending === 0) {
+      database.close();
+      process.exit(0);
+    }
+  };
+  server.close(closed);
+  if (sync) sync.server.close(closed);
   setTimeout(() => process.exit(1), 5000).unref();
 }
 

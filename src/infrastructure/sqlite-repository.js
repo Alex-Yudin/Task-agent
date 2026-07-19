@@ -94,6 +94,15 @@ export class SqliteRepository {
     `).all(...params).map(projectRow);
   }
 
+  listProjectsChangedSince(since) {
+    return this.db.prepare(`
+      SELECT p.*,
+        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS task_count,
+        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'done') AS completed_task_count
+      FROM projects p WHERE p.updated_at > ? ORDER BY p.updated_at
+    `).all(since).map(projectRow);
+  }
+
   updateProject(id, changes) {
     const fields = [];
     const params = [];
@@ -162,6 +171,55 @@ export class SqliteRepository {
         CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END, t.due_at, t.created_at DESC
       LIMIT ?
     `).all(...params).map(taskRow);
+  }
+
+  listTasksChangedSince(since) {
+    return this.db.prepare(`
+      SELECT t.*, p.title AS project_title,
+        (SELECT COUNT(*) FROM tasks s WHERE s.parent_task_id = t.id) AS subtask_count,
+        (SELECT COUNT(*) FROM tasks s WHERE s.parent_task_id = t.id AND s.status = 'done') AS completed_subtask_count
+      FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+      WHERE t.updated_at > ? ORDER BY t.updated_at
+    `).all(since).map(taskRow);
+  }
+
+  upsertSyncedProject(project) {
+    const result = this.db.prepare(`
+      INSERT INTO projects(id, title, description, status, color, author, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        status = excluded.status,
+        color = excluded.color,
+        author = excluded.author,
+        updated_at = excluded.updated_at
+      WHERE excluded.updated_at > projects.updated_at
+    `).run(project.id, project.title, project.description, project.status, project.color,
+      project.author, project.createdAt, project.updatedAt);
+    return Number(result.changes);
+  }
+
+  upsertSyncedTask(task) {
+    const result = this.db.prepare(`
+      INSERT INTO tasks(id, project_id, parent_task_id, title, description, status, priority,
+        due_at, completed_at, author, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        project_id = excluded.project_id,
+        parent_task_id = excluded.parent_task_id,
+        title = excluded.title,
+        description = excluded.description,
+        status = excluded.status,
+        priority = excluded.priority,
+        due_at = excluded.due_at,
+        completed_at = excluded.completed_at,
+        author = excluded.author,
+        updated_at = excluded.updated_at
+      WHERE excluded.updated_at > tasks.updated_at
+    `).run(task.id, task.projectId, task.parentTaskId, task.title, task.description, task.status,
+      task.priority, task.dueAt, task.completedAt, task.author, task.createdAt, task.updatedAt);
+    return Number(result.changes);
   }
 
   updateTask(id, changes) {

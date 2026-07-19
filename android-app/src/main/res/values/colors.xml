@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="orbita_primary">#6C5CE7</color>
+    <color name="orbita_primary_dark">#5143BE</color>
+    <color name="orbita_background">#F7F6FA</color>
+    <color name="orbita_text">#1E1D2D</color>
+</resources>
