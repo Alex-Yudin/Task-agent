@@ -30,7 +30,17 @@ const googleTokenStore = new SecureTokenStore({
   filePath: config.googleOAuth.tokenFile,
   dpapiScript: config.googleOAuth.dpapiScript
 });
-const googleOAuth = new GoogleOAuthService({ config, tokenStore: googleTokenStore, logger });
+const googleCredentialsStore = new SecureTokenStore({
+  filePath: config.googleOAuth.clientCredentialsFile,
+  dpapiScript: config.googleOAuth.dpapiScript,
+  description: "локальные данные OAuth Client"
+});
+const googleOAuth = new GoogleOAuthService({
+  config,
+  tokenStore: googleTokenStore,
+  credentialsStore: googleCredentialsStore,
+  logger
+});
 const googleSheetsApi = new GoogleSheetsApiService({ config, oauth: googleOAuth, syncService, logger });
 const googleSheetsSync = new GoogleSheetsSyncService({ config, syncService, logger, oauthSheets: googleSheetsApi });
 const service = new TaskManagerService({
@@ -115,7 +125,7 @@ async function handleApi(request, response, url) {
 
   if (method === "GET" && pathname === "/api/health") {
     return sendJson(response, 200, {
-      status: "ok", version: "0.4.0", storage: "sqlite", androidSync: Boolean(sync),
+      status: "ok", version: "0.4.1", storage: "sqlite", androidSync: Boolean(sync),
       googleSheets: googleSheetsSync.status()
     });
   }

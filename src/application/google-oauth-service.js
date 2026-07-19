@@ -15,22 +15,27 @@ const SCOPES = [
 function base64Url(value) { return Buffer.from(value).toString("base64url"); }
 
 export class GoogleOAuthService {
-  constructor({ config, tokenStore, fetchImpl = fetch, clock = () => new Date(), logger }) {
+  constructor({ config, tokenStore, credentialsStore = null, fetchImpl = fetch, clock = () => new Date(), logger, environment = process.env }) {
     this.config = config.googleOAuth;
     this.tokenStore = tokenStore;
+    this.credentialsStore = credentialsStore;
     this.fetchImpl = fetchImpl;
     this.clock = clock;
     this.logger = logger;
+    this.environment = environment;
     this.pending = null;
   }
 
   status() {
     let tokens = null;
+    let credentials = null;
     let error = null;
     try { tokens = this.tokenStore.load(); } catch (loadError) { error = loadError.message; }
+    try { credentials = this.credentials(); } catch (credentialsError) { error = credentialsError.message; }
     return {
       enabled: Boolean(this.config.enabled),
-      configured: Boolean(this.config.enabled && this.config.clientId),
+      configured: Boolean(this.config.enabled && credentials?.clientId),
+      clientSecretConfigured: Boolean(credentials?.clientSecret),
       connected: Boolean(tokens?.refreshToken || tokens?.accessToken),
       account: tokens?.account || null,
       error
@@ -38,15 +43,19 @@ export class GoogleOAuthService {
   }
 
   begin() {
-    if (!this.config.enabled || !this.config.clientId) {
+    const credentials = this.credentials();
+    if (!this.config.enabled || !credentials.clientId) {
       throw new DomainError("Desktop OAuth Client ID не настроен", "GOOGLE_OAUTH_NOT_CONFIGURED", 409);
+    }
+    if (!credentials.clientSecret) {
+      throw new DomainError("Не добавлен локальный OAuth Client JSON. Запустите configure-google-oauth.cmd и выберите JSON, скачанный из Google Cloud", "GOOGLE_OAUTH_CLIENT_CREDENTIALS_REQUIRED", 409);
     }
     const verifier = base64Url(randomBytes(48));
     const challenge = createHash("sha256").update(verifier).digest("base64url");
     const state = base64Url(randomBytes(32));
-    this.pending = { verifier, state, createdAt: this.clock().valueOf() };
+    this.pending = { verifier, state, clientId: credentials.clientId, createdAt: this.clock().valueOf() };
     const url = new URL(AUTHORIZATION_ENDPOINT);
-    url.searchParams.set("client_id", this.config.clientId);
+    url.searchParams.set("client_id", credentials.clientId);
     url.searchParams.set("redirect_uri", this.config.redirectUri);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", SCOPES.join(" "));
@@ -72,8 +81,13 @@ export class GoogleOAuthService {
     }
     if (!code) throw new DomainError("Google не вернул код авторизации", "GOOGLE_OAUTH_MISSING_CODE", 400);
 
+    const credentials = this.credentials();
+    if (credentials.clientId !== pending.clientId) {
+      throw new DomainError("OAuth Client изменился во время входа. Запустите авторизацию снова", "GOOGLE_OAUTH_CLIENT_CHANGED", 409);
+    }
     const token = await this.tokenRequest({
-      client_id: this.config.clientId,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       code,
       code_verifier: pending.verifier,
       grant_type: "authorization_code",
@@ -99,8 +113,13 @@ export class GoogleOAuthService {
       this.tokenStore.clear();
       throw new DomainError("Сеанс Google истёк. Войдите снова", "GOOGLE_OAUTH_EXPIRED", 401);
     }
+    const credentials = this.credentials();
+    if (!credentials.clientId || !credentials.clientSecret) {
+      throw new DomainError("Запустите configure-google-oauth.cmd и добавьте OAuth Client JSON", "GOOGLE_OAUTH_CLIENT_CREDENTIALS_REQUIRED", 409);
+    }
     const token = await this.tokenRequest({
-      client_id: this.config.clientId,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       refresh_token: stored.refreshToken,
       grant_type: "refresh_token"
     });
@@ -154,8 +173,25 @@ export class GoogleOAuthService {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || !body.access_token) {
+      if (/client_secret.*missing/iu.test(`${body.error || ""} ${body.error_description || ""}`)) {
+        throw new DomainError("Google требует client_secret. Запустите configure-google-oauth.cmd и выберите OAuth Client JSON", "GOOGLE_OAUTH_CLIENT_CREDENTIALS_REQUIRED", 409);
+      }
       throw new DomainError(body.error_description || body.error || "Ошибка получения Google-токена", "GOOGLE_OAUTH_TOKEN_FAILED", 502);
     }
     return body;
+  }
+
+  credentials() {
+    const stored = this.credentialsStore?.load?.() || {};
+    const source = stored.installed || stored.web || stored;
+    const configuredClientId = String(this.config.clientId || "").trim();
+    const storedClientId = String(source.client_id || source.clientId || "").trim();
+    if (configuredClientId && storedClientId && configuredClientId !== storedClientId) {
+      throw new DomainError("Выбран OAuth Client JSON от другого Client ID", "GOOGLE_OAUTH_CLIENT_ID_MISMATCH", 409);
+    }
+    return {
+      clientId: storedClientId || configuredClientId,
+      clientSecret: String(this.environment.ORBITA_GOOGLE_CLIENT_SECRET || source.client_secret || source.clientSecret || "").trim()
+    };
   }
 }

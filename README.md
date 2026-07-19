@@ -33,6 +33,8 @@
 
 Рекомендуемый способ подключения — Google OAuth по инструкции [docs/GOOGLE_OAUTH.md](docs/GOOGLE_OAUTH.md). Apps Script из [docs/GOOGLE_SHEETS.md](docs/GOOGLE_SHEETS.md) сохранён как совместимый резервный режим. После настройки:
 
+Перед первым входом запустите `configure-google-oauth.cmd` и выберите скачанный из Google Cloud OAuth Client JSON. Локальная копия шифруется Windows DPAPI и не попадает в Git.
+
 - Windows отправляет изменения автоматически и проверяет таблицу каждые пять минут;
 - Android может синхронизироваться напрямую через интернет по URL Google Apps Script;
 - ChatGPT читает и заполняет ту же таблицу через подключение Google Drive;

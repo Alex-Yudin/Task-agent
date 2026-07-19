@@ -217,7 +217,7 @@ test("обменивается задачами с Google Таблицей и н
   google.close();
 });
 
-test("выполняет Desktop OAuth через PKCE без client secret", async () => {
+test("выполняет Desktop OAuth через PKCE и локальные Client Credentials", async () => {
   let saved = null;
   const tokenStore = {
     load: () => saved,
@@ -232,7 +232,12 @@ test("выполняет Desktop OAuth через PKCE без client secret", as
       redirectUri: "http://127.0.0.1:3765/api/google/oauth/callback"
     } },
     tokenStore,
+    credentialsStore: { load: () => ({ installed: {
+      client_id: "desktop-client.apps.googleusercontent.com",
+      client_secret: "local-client-secret"
+    } }) },
     logger: new NullLogger(),
+    environment: {},
     clock: () => new Date(FIXED_DATE),
     fetchImpl: async (url, options = {}) => {
       requests.push({ url, options });
@@ -252,9 +257,25 @@ test("выполняет Desktop OAuth через PKCE без client secret", as
   const result = await oauth.complete({ code: "authorization-code", state: authorizationUrl.searchParams.get("state") });
   const tokenBody = requests[0].options.body;
   assert.ok(tokenBody.get("code_verifier"));
-  assert.equal(tokenBody.get("client_secret"), null);
+  assert.equal(tokenBody.get("client_secret"), "local-client-secret");
   assert.equal(result.account.email, "user@example.com");
   assert.equal(saved.refreshToken, "refresh-1");
+});
+
+test("не запускает Google OAuth без локального Client JSON", () => {
+  const oauth = new GoogleOAuthService({
+    config: { googleOAuth: {
+      enabled: true,
+      clientId: "desktop-client.apps.googleusercontent.com",
+      redirectUri: "http://127.0.0.1:3765/api/google/oauth/callback"
+    } },
+    tokenStore: { load: () => null },
+    credentialsStore: { load: () => null },
+    logger: new NullLogger(),
+    environment: {}
+  });
+
+  assert.throws(() => oauth.begin(), error => error.code === "GOOGLE_OAUTH_CLIENT_CREDENTIALS_REQUIRED");
 });
 
 test("синхронизирует SQLite с Google Sheets API после OAuth", async () => {

@@ -25,6 +25,7 @@ const elements = {
   googleDialog: document.querySelector("#googleDialog"),
   googleAccountStatus: document.querySelector("#googleAccountStatus"),
   googleSpreadsheetStatus: document.querySelector("#googleSpreadsheetStatus"),
+  googleCredentialsHint: document.querySelector("#googleCredentialsHint"),
   toastRegion: document.querySelector("#toastRegion")
 };
 
@@ -101,7 +102,8 @@ async function refreshGoogleOAuthStatus() {
   elements.googleSpreadsheetStatus.querySelector("span").textContent = status.spreadsheet
     ? `Таблица: ${status.spreadsheet.title}`
     : "Таблица не выбрана";
-  document.querySelector("#googleSignInButton").hidden = status.connected;
+  elements.googleCredentialsHint.hidden = status.clientSecretConfigured;
+  document.querySelector("#googleSignInButton").hidden = status.connected || !status.clientSecretConfigured;
   document.querySelector("#googleCreateSheetButton").hidden = !status.connected || Boolean(status.spreadsheet);
   document.querySelector("#googleUseSheetButton").hidden = !status.connected;
   document.querySelector("#googleSpreadsheetInput").parentElement.hidden = !status.connected;
