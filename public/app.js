@@ -96,9 +96,8 @@ async function refreshGoogleSheetsStatus() {
 
 async function refreshGoogleOAuthStatus() {
   const status = await api("/api/google/oauth/status");
-  elements.googleAccountStatus.querySelector("span").textContent = status.connected
-    ? `Подключён: ${status.account?.email || "Google-аккаунт"}`
-    : "Google-аккаунт не подключён";
+  elements.googleAccountStatus.querySelector("span").textContent = status.scopeError
+    || (status.connected ? `Подключён: ${status.account?.email || "Google-аккаунт"}` : "Google-аккаунт не подключён");
   elements.googleSpreadsheetStatus.querySelector("span").textContent = status.spreadsheet
     ? `Таблица: ${status.spreadsheet.title}`
     : "Таблица не выбрана";
@@ -110,7 +109,7 @@ async function refreshGoogleOAuthStatus() {
   const openLink = document.querySelector("#googleOpenSheetLink");
   openLink.hidden = !status.spreadsheet?.url;
   openLink.href = status.spreadsheet?.url || "#";
-  document.querySelector("#googleDisconnectButton").hidden = !status.connected;
+  document.querySelector("#googleDisconnectButton").hidden = !status.authorized;
   return status;
 }
 
