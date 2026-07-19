@@ -206,14 +206,14 @@ public final class MainActivity extends Activity {
 
     private void showSettings() {
         screen = "settings";
-        clear("Синхронизация", "Компьютер и телефон должны быть в одной Wi‑Fi-сети");
+        clear("Синхронизация", "Google Таблица через интернет или компьютер в локальной сети");
         LinearLayout form = card();
-        form.addView(label("Адрес компьютера"));
-        EditText server = input("Например: http://192.168.1.10:3766");
+        form.addView(label("Адрес синхронизации"));
+        EditText server = input("URL Google Apps Script /exec или адрес компьютера");
         server.setText(preferences.getString("sync_url", ""));
         form.addView(server, marginBottom(dp(12)));
-        form.addView(label("Токен из файла data/sync-token.txt"));
-        EditText token = input("Токен синхронизации");
+        form.addView(label("Секрет Google Таблицы или локальный токен"));
+        EditText token = input("Секрет синхронизации");
         token.setText(preferences.getString("sync_token", ""));
         form.addView(token, marginBottom(dp(12)));
         TextView device = text("Устройство: " + preferences.getString("device_id", ""), 10, MUTED, false);
@@ -233,7 +233,7 @@ public final class MainActivity extends Activity {
         TextView lastSync = text(last.trim().isEmpty() ? "Синхронизация ещё не выполнялась" : "Последняя синхронизация: " + formatDate(last), 11, MUTED, false);
         lastSync.setPadding(dp(4), dp(13), dp(4), dp(8));
         content.addView(lastSync);
-        content.addView(empty("На Windows запустите start-windows.cmd. Адрес компьютера можно узнать командой ipconfig."));
+        content.addView(empty("Для облачной синхронизации вставьте URL опубликованного Google Apps Script и секрет setupOrbita. Локальная синхронизация с Windows также поддерживается."));
     }
 
     private View stat(String label, int value) {
@@ -255,6 +255,7 @@ public final class MainActivity extends Activity {
         done.setChecked("done".equals(task.status));
         done.setOnCheckedChangeListener((button, checked) -> {
             database.setTaskDone(task.id, checked);
+            synchronize(false);
             if ("dashboard".equals(screen)) showDashboard(); else showTasks();
         });
         card.addView(done);
@@ -278,7 +279,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("Создать", (dialog, which) -> {
                     String value = title.getText().toString().trim();
                     if (value.isEmpty()) toast("Введите название проекта");
-                    else { database.createProject(value); showProjects(); }
+                    else { database.createProject(value); synchronize(false); showProjects(); }
                 }).show();
     }
 
@@ -309,6 +310,7 @@ public final class MainActivity extends Activity {
                     String projectId = project.getSelectedItemPosition() == 0 ? null : projects.get(project.getSelectedItemPosition() - 1).id;
                     String[] priorities = {"normal", "high", "urgent", "low"};
                     database.createTask(value, projectId, priorities[priority.getSelectedItemPosition()], null);
+                    synchronize(false);
                     if ("dashboard".equals(screen)) showDashboard(); else showTasks();
                 }).show();
     }
@@ -333,7 +335,7 @@ public final class MainActivity extends Activity {
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
-                    syncStatus.setText("Нет связи с компьютером");
+                    syncStatus.setText("Нет связи с хранилищем");
                     if (notify) toast(error.getMessage() == null ? "Ошибка синхронизации" : error.getMessage());
                 });
             }
@@ -373,7 +375,7 @@ public final class MainActivity extends Activity {
         String lower = value.toLowerCase(Locale.forLanguageTag("ru-RU"));
         if (lower.startsWith("создай проект ")) {
             String title = value.substring("создай проект ".length()).trim();
-            if (!title.isEmpty()) { database.createProject(title); toast("Проект создан"); showProjects(); return; }
+            if (!title.isEmpty()) { database.createProject(title); synchronize(false); toast("Проект создан"); showProjects(); return; }
         }
         String[] prefixes = {"создай задачу ", "добавь задачу ", "задача "};
         for (String prefix : prefixes) {
@@ -384,6 +386,7 @@ public final class MainActivity extends Activity {
                 String priority = lower.contains("срочно") ? "urgent" : lower.contains("важно") ? "high" : "normal";
                 title = title.replaceFirst("(?iu)^(срочно|важно)[,:-]?\\s*", "");
                 database.createTask(title, null, priority, due);
+                synchronize(false);
                 toast("Задача добавлена"); showTasks(); return;
             }
         }

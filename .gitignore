@@ -8,3 +8,5 @@ node_modules/
 local.properties
 *.jks
 *.keystore
+dist/
+Orbita-Android-*.zip

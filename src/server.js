@@ -10,6 +10,7 @@ import { RuleBasedDialogueAnalyzer } from "./application/dialogue-analyzer.js";
 import { TaskManagerService } from "./application/task-manager-service.js";
 import { BackupService } from "./application/backup-service.js";
 import { SyncService } from "./application/sync-service.js";
+import { GoogleSheetsSyncService } from "./application/google-sheets-sync-service.js";
 import { createSyncServer } from "./infrastructure/sync-server.js";
 import { DomainError } from "./domain/errors.js";
 
@@ -20,9 +21,13 @@ const database = openDatabase(databasePath);
 const logger = new JsonLogger(path.join(config.dataDirectory, "logs"));
 const repository = new SqliteRepository(database);
 const analyzer = new RuleBasedDialogueAnalyzer();
-const service = new TaskManagerService({ repository, analyzer, author: config.author, logger });
 const backupService = new BackupService({ database, backupDirectory: config.backupDirectory, logger });
 const syncService = new SyncService({ repository, logger });
+const googleSheetsSync = new GoogleSheetsSyncService({ config, syncService, logger });
+const service = new TaskManagerService({
+  repository, analyzer, author: config.author, logger,
+  onChange: () => googleSheetsSync.schedule("local-change")
+});
 const sync = createSyncServer({ config, syncService, logger });
 
 const staticFiles = new Map([
@@ -87,7 +92,10 @@ async function handleApi(request, response, url) {
   const pathname = url.pathname;
 
   if (method === "GET" && pathname === "/api/health") {
-    return sendJson(response, 200, { status: "ok", version: "0.2.0", storage: "sqlite", androidSync: Boolean(sync) });
+    return sendJson(response, 200, {
+      status: "ok", version: "0.3.0", storage: "sqlite", androidSync: Boolean(sync),
+      googleSheets: googleSheetsSync.status()
+    });
   }
   if (method === "GET" && pathname === "/api/bootstrap") {
     return sendJson(response, 200, service.bootstrap());
@@ -131,6 +139,12 @@ async function handleApi(request, response, url) {
   if (method === "POST" && pathname === "/api/backups") {
     return sendJson(response, 201, await backupService.create());
   }
+  if (method === "GET" && pathname === "/api/google-sheets/status") {
+    return sendJson(response, 200, googleSheetsSync.status());
+  }
+  if (method === "POST" && pathname === "/api/google-sheets/sync") {
+    return sendJson(response, 200, await googleSheetsSync.synchronize("manual"));
+  }
   return sendJson(response, 404, { error: { code: "NOT_FOUND", message: "Адрес API не найден" } });
 }
 
@@ -158,6 +172,8 @@ server.listen(config.port, config.host, () => {
   console.log(`ИИ-менеджер задач запущен: http://${config.host}:${config.port}`);
 });
 
+googleSheetsSync.start();
+
 if (sync) {
   sync.server.listen(config.sync.port, config.sync.host, () => {
     logger.info("sync.started", { host: config.sync.host, port: config.sync.port, tokenFile: sync.tokenFile });
@@ -167,6 +183,7 @@ if (sync) {
 
 function shutdown(signal) {
   logger.info("application.stopping", { signal });
+  googleSheetsSync.close();
   let pending = sync ? 2 : 1;
   const closed = () => {
     pending -= 1;

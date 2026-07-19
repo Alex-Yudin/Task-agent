@@ -14,6 +14,12 @@ export function loadConfig(rootDirectory) {
       host: raw.sync?.host || "0.0.0.0",
       port: raw.sync?.port || 3766,
       tokenFile: path.resolve(rootDirectory, raw.sync?.tokenFile || "data/sync-token.txt")
+    },
+    googleSheets: {
+      enabled: raw.googleSheets?.enabled !== false,
+      credentialsFile: path.resolve(rootDirectory, raw.googleSheets?.credentialsFile || "data/google-sheets-sync.json"),
+      intervalSeconds: Math.max(Number(raw.googleSheets?.intervalSeconds) || 300, 30),
+      debounceMilliseconds: Math.max(Number(raw.googleSheets?.debounceMilliseconds) || 500, 100)
     }
   };
 }
