@@ -15,6 +15,7 @@
         <button class="nav-item active" data-view="dashboard"><span>◫</span>Обзор</button>
         <button class="nav-item" data-view="projects"><span>◇</span>Проекты</button>
         <button class="nav-item" data-view="tasks"><span>✓</span>Задачи</button>
+        <button class="nav-item" data-view="ideas"><span>✦</span>Идеи</button>
         <button class="nav-item" data-view="history"><span>◷</span>История</button>
       </nav>
       <div class="sidebar-foot">
@@ -22,6 +23,7 @@
         <div id="googleSheetsState" class="storage-state"><i></i><span>Google Таблица не настроена</span></div>
         <button id="googleConnectButton" class="ghost-button">Аккаунт Google</button>
         <button id="googleSheetsSyncButton" class="ghost-button">Синхронизировать Google</button>
+        <button id="notificationsButton" class="ghost-button">Включить уведомления</button>
         <button id="backupButton" class="ghost-button">Создать резервную копию</button>
       </div>
     </aside>
@@ -50,6 +52,7 @@
       <div class="suggestions">
         <button data-prompt="Создай проект Судебные дела">Создать проект</button>
         <button data-prompt="Задача: подготовить документы до завтра">Добавить задачу</button>
+        <button data-prompt="Идея на будущее: сделать архив шаблонов">Сохранить идею</button>
         <button data-prompt="План на сегодня">План на сегодня</button>
       </div>
       <form id="chatForm" class="chat-form">
@@ -71,10 +74,21 @@
       <label>Проект<select name="projectId"><option value="">Без проекта</option></select></label>
       <div class="form-row">
         <label>Срок<input name="dueAt" type="datetime-local"></label>
-        <label>Приоритет<select name="priority"><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option><option value="low">Низкий</option></select></label>
+        <label>Срочность<select name="urgency"><option value="urgent">Срочная — сегодня</option><option value="medium">Среднесрочная — завтра</option><option value="not_urgent">Несрочная — по дате</option></select></label>
       </div>
+      <label>Приоритет<select name="priority"><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Критический</option><option value="low">Низкий</option></select></label>
       <label>Описание<textarea name="description" rows="3" maxlength="5000"></textarea></label>
       <div class="modal-actions"><button type="button" class="secondary-button close-modal">Отмена</button><button type="submit" class="primary-button">Добавить задачу</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ideaDialog" class="modal small-modal">
+    <form id="ideaForm" method="dialog">
+      <div class="modal-head"><div><p class="eyebrow">ИДЕЯ НА БУДУЩЕЕ</p><h2>Сохранить мысль</h2></div><button type="button" class="icon-button close-idea-modal">×</button></div>
+      <label>Название<input name="title" required maxlength="300" placeholder="Например, собрать библиотеку шаблонов"></label>
+      <label>Связанный проект<select name="projectId"><option value="">Без проекта</option></select></label>
+      <label>Описание<textarea name="description" rows="4" maxlength="5000"></textarea></label>
+      <div class="modal-actions"><button type="button" class="secondary-button close-idea-modal">Отмена</button><button type="submit" class="primary-button">Сохранить идею</button></div>
     </form>
   </dialog>
 

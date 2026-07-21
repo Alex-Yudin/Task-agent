@@ -2,9 +2,11 @@ const ORBITA = Object.freeze({
   protocolVersion: 1,
   projectSheet: "Projects",
   taskSheet: "Tasks",
+  ideaSheet: "Ideas",
   instructionSheet: "Instructions",
   projectHeaders: ["id", "title", "description", "status", "color", "author", "createdAt", "updatedAt", "source", "syncHash"],
-  taskHeaders: ["id", "projectId", "projectTitle", "parentTaskId", "title", "description", "status", "priority", "dueAt", "completedAt", "author", "createdAt", "updatedAt", "source", "syncHash"]
+  taskHeaders: ["id", "projectId", "projectTitle", "parentTaskId", "title", "description", "status", "priority", "urgency", "dueAt", "completedAt", "author", "createdAt", "updatedAt", "source", "syncHash"],
+  ideaHeaders: ["id", "title", "description", "status", "projectId", "projectTitle", "author", "createdAt", "updatedAt", "source", "syncHash"]
 });
 
 function onOpen() {
@@ -28,7 +30,11 @@ function setupOrbita() {
   });
   ensureDataSheet(spreadsheet, ORBITA.taskSheet, ORBITA.taskHeaders, {
     status: ["todo", "in_progress", "done", "cancelled"],
-    priority: ["low", "normal", "high", "urgent"]
+    priority: ["low", "normal", "high", "urgent"],
+    urgency: ["urgent", "medium", "not_urgent"]
+  });
+  ensureDataSheet(spreadsheet, ORBITA.ideaSheet, ORBITA.ideaHeaders, {
+    status: ["new", "planned", "converted", "archived"]
   });
   ensureInstructions(spreadsheet);
   normalizeWorkbook(spreadsheet);
@@ -72,21 +78,28 @@ function doPost(event) {
     });
     ensureDataSheet(spreadsheet, ORBITA.taskSheet, ORBITA.taskHeaders, {
       status: ["todo", "in_progress", "done", "cancelled"],
-      priority: ["low", "normal", "high", "urgent"]
+      priority: ["low", "normal", "high", "urgent"],
+      urgency: ["urgent", "medium", "not_urgent"]
+    });
+    ensureDataSheet(spreadsheet, ORBITA.ideaSheet, ORBITA.ideaHeaders, {
+      status: ["new", "planned", "converted", "archived"]
     });
     const normalized = normalizeWorkbook(spreadsheet);
     const projects = mergeByTimestamp(normalized.projects, Array.isArray(payload.projects) ? payload.projects : [], "project");
     const tasks = mergeByTimestamp(normalized.tasks, Array.isArray(payload.tasks) ? payload.tasks : [], "task");
-    const finalized = finalizeWorkbook(projects, tasks);
+    const ideas = mergeByTimestamp(normalized.ideas, Array.isArray(payload.ideas) ? payload.ideas : [], "idea");
+    const finalized = finalizeWorkbook(projects, tasks, ideas);
     writeEntities(spreadsheet.getSheetByName(ORBITA.projectSheet), ORBITA.projectHeaders, finalized.projects);
     writeEntities(spreadsheet.getSheetByName(ORBITA.taskSheet), ORBITA.taskHeaders, finalized.tasks);
+    writeEntities(spreadsheet.getSheetByName(ORBITA.ideaSheet), ORBITA.ideaHeaders, finalized.ideas);
     return jsonOutput({
       ok: true,
       protocolVersion: ORBITA.protocolVersion,
       serverTime: new Date().toISOString(),
       projects: finalized.projects.map(stripInternal),
       tasks: finalized.tasks.map(stripInternal),
-      stats: { projects: finalized.projects.length, tasks: finalized.tasks.length }
+      ideas: finalized.ideas.map(stripInternal),
+      stats: { projects: finalized.projects.length, tasks: finalized.tasks.length, ideas: finalized.ideas.length }
     });
   } catch (error) {
     return jsonOutput({ ok: false, error: { code: "SYNC_ERROR", message: String(error.message || error) } });
@@ -102,9 +115,13 @@ function normalizeWorkbook(spreadsheet) {
   let tasks = readEntities(spreadsheet.getSheetByName(ORBITA.taskSheet), ORBITA.taskHeaders)
     .filter(function (item) { return text(item.title); })
     .map(function (item) { return normalizeTask(item, false); });
-  const finalized = finalizeWorkbook(projects, tasks);
+  let ideas = readEntities(spreadsheet.getSheetByName(ORBITA.ideaSheet), ORBITA.ideaHeaders)
+    .filter(function (item) { return text(item.title); })
+    .map(function (item) { return normalizeIdea(item, false); });
+  const finalized = finalizeWorkbook(projects, tasks, ideas);
   writeEntities(spreadsheet.getSheetByName(ORBITA.projectSheet), ORBITA.projectHeaders, finalized.projects);
   writeEntities(spreadsheet.getSheetByName(ORBITA.taskSheet), ORBITA.taskHeaders, finalized.tasks);
+  writeEntities(spreadsheet.getSheetByName(ORBITA.ideaSheet), ORBITA.ideaHeaders, finalized.ideas);
   return finalized;
 }
 
@@ -114,7 +131,7 @@ function orbitaSpreadsheet() {
   return SpreadsheetApp.openById(spreadsheetId);
 }
 
-function finalizeWorkbook(projects, tasks) {
+function finalizeWorkbook(projects, tasks, ideas) {
   const now = new Date().toISOString();
   const byTitle = {};
   const byId = {};
@@ -142,14 +159,19 @@ function finalizeWorkbook(projects, tasks) {
     task.syncHash = entityHash(task, "task");
   });
   projects.forEach(function (project) { project.syncHash = entityHash(project, "project"); });
-  return { projects: projects, tasks: tasks };
+  (ideas || []).forEach(function (idea) {
+    if (idea.projectId && byId[idea.projectId]) idea.projectTitle = byId[idea.projectId].title;
+    else if (idea.projectId) idea.projectId = null;
+    idea.syncHash = entityHash(idea, "idea");
+  });
+  return { projects: projects, tasks: tasks, ideas: ideas || [] };
 }
 
 function mergeByTimestamp(current, incoming, kind) {
   const values = {};
   current.forEach(function (item) { values[item.id] = item; });
   incoming.forEach(function (raw) {
-    const item = kind === "project" ? normalizeProject(raw, true) : normalizeTask(raw, true);
+    const item = kind === "project" ? normalizeProject(raw, true) : kind === "idea" ? normalizeIdea(raw, true) : normalizeTask(raw, true);
     if (!item.id || !item.title) return;
     const existing = values[item.id];
     if (!existing || item.updatedAt > existing.updatedAt) values[item.id] = item;
@@ -191,6 +213,7 @@ function normalizeTask(raw, trustedTimestamp) {
     description: nullableText(raw.description),
     status: allowed(raw.status, ["todo", "in_progress", "done", "cancelled"], "todo"),
     priority: allowed(raw.priority, ["low", "normal", "high", "urgent"], "normal"),
+    urgency: allowed(raw.urgency, ["urgent", "medium", "not_urgent"], urgencyFromDate(raw.dueAt)),
     dueAt: nullableIso(raw.dueAt),
     completedAt: nullableIso(raw.completedAt),
     author: text(raw.author) || "ChatGPT",
@@ -208,6 +231,30 @@ function normalizeTask(raw, trustedTimestamp) {
     if (item.status === "done" && !item.completedAt) item.completedAt = now;
   }
   item.syncHash = entityHash(item, "task");
+  return item;
+}
+
+function normalizeIdea(raw, trustedTimestamp) {
+  const now = new Date().toISOString();
+  const item = {
+    id: text(raw.id) || Utilities.getUuid(),
+    title: text(raw.title),
+    description: nullableText(raw.description),
+    status: allowed(raw.status, ["new", "planned", "converted", "archived"], "new"),
+    projectId: nullableText(raw.projectId),
+    projectTitle: nullableText(raw.projectTitle),
+    author: text(raw.author) || "ChatGPT",
+    createdAt: iso(raw.createdAt, now),
+    updatedAt: iso(raw.updatedAt, now),
+    source: text(raw.source) || "Google Sheets",
+    syncHash: text(raw.syncHash)
+  };
+  const hash = entityHash(item, "idea");
+  if (!trustedTimestamp && item.syncHash && item.syncHash !== hash) {
+    item.updatedAt = now;
+    item.source = "Google Sheets";
+  }
+  item.syncHash = entityHash(item, "idea");
   return item;
 }
 
@@ -234,6 +281,12 @@ function writeEntities(sheet, headers, entities) {
 function ensureDataSheet(spreadsheet, name, headers, validations) {
   let sheet = spreadsheet.getSheetByName(name);
   if (!sheet) sheet = spreadsheet.insertSheet(name);
+  const currentHeaders = sheet.getLastColumn()
+    ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getValues()[0]
+    : [];
+  if (name === ORBITA.taskSheet && currentHeaders.indexOf("dueAt") >= 0 && currentHeaders.indexOf("urgency") < 0) {
+    sheet.insertColumnBefore(currentHeaders.indexOf("dueAt") + 1);
+  }
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, headers.length)
@@ -253,6 +306,17 @@ function ensureDataSheet(spreadsheet, name, headers, validations) {
   });
   const hashColumn = headers.indexOf("syncHash") + 1;
   if (hashColumn > 0) sheet.hideColumns(hashColumn);
+  if (name === ORBITA.taskSheet) {
+    const urgencyColumn = headers.indexOf("urgency") + 1;
+    const dataRange = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), headers.length);
+    const retainedRules = sheet.getConditionalFormatRules().filter(function (rule) {
+      return rule.getBooleanCondition() == null || rule.getBooleanCondition().getCriteriaValues()[0] !== "=$I2=\"urgent\"";
+    });
+    retainedRules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied("=$" + columnName(urgencyColumn) + "2=\"urgent\"")
+      .setBackground("#FCE8EC").setFontColor("#9B1C31").setRanges([dataRange]).build());
+    sheet.setConditionalFormatRules(retainedRules);
+  }
   return sheet;
 }
 
@@ -261,9 +325,11 @@ function ensureInstructions(spreadsheet) {
   if (!sheet) sheet = spreadsheet.insertSheet(ORBITA.instructionSheet, 0);
   const rows = [
     ["ОРБИТА — единый реестр задач"],
-    ["Лист Tasks хранит задачи, Projects — проекты. Строки можно менять вручную или через ChatGPT."],
-    ["Не изменяйте столбцы id, createdAt и syncHash. При ручном добавлении достаточно заполнить title, projectTitle, status, priority и dueAt."],
-    ["Допустимые статусы задач: todo, in_progress, done, cancelled. Приоритеты: low, normal, high, urgent."],
+    ["Листы: Tasks — задачи и подзадачи, Projects — проекты, Ideas — идеи на будущее."],
+    ["Классификация: действие — Tasks; результат из нескольких шагов — Projects и связанные Tasks; мысль без обязательства — Ideas."],
+    ["Срочность Tasks: urgent — сегодня, medium — завтра, not_urgent — конкретная более поздняя дата. Срочные строки выделяются красным."],
+    ["Не изменяйте id, createdAt и syncHash. При ручном добавлении заполните title, projectTitle, status, priority, urgency и dueAt."],
+    ["Статусы задач: todo, in_progress, done, cancelled. Статусы идей: new, planned, converted, archived."],
     ["Для синхронизации запустите setupOrbita(), затем опубликуйте Apps Script как Web app: Execute as Me, access Anyone."],
     ["Секрет храните только в настройках Орбиты и не публикуйте."]
   ];
@@ -280,7 +346,9 @@ function ensureInstructions(spreadsheet) {
 function entityHash(item, kind) {
   const fields = kind === "project"
     ? ["id", "title", "description", "status", "color", "author", "createdAt", "updatedAt", "source"]
-    : ["id", "projectId", "projectTitle", "parentTaskId", "title", "description", "status", "priority", "dueAt", "completedAt", "author", "createdAt", "updatedAt", "source"];
+    : kind === "idea"
+      ? ["id", "title", "description", "status", "projectId", "projectTitle", "author", "createdAt", "updatedAt", "source"]
+      : ["id", "projectId", "projectTitle", "parentTaskId", "title", "description", "status", "priority", "urgency", "dueAt", "completedAt", "author", "createdAt", "updatedAt", "source"];
   const value = fields.map(function (field) { return item[field] == null ? "" : String(item[field]); }).join("\u001f");
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value)).replace(/=+$/g, "");
 }
@@ -306,6 +374,25 @@ function iso(value, fallback) {
   return isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
 }
 function nullableIso(value) { return text(value) ? iso(value, null) : null; }
+function urgencyFromDate(value) {
+  const due = new Date(text(value));
+  if (isNaN(due.getTime())) return "not_urgent";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const difference = Math.round((dueDay.getTime() - today.getTime()) / 86400000);
+  return difference <= 0 ? "urgent" : difference === 1 ? "medium" : "not_urgent";
+}
+function columnName(column) {
+  let value = column;
+  let result = "";
+  while (value > 0) {
+    value -= 1;
+    result = String.fromCharCode(65 + (value % 26)) + result;
+    value = Math.floor(value / 26);
+  }
+  return result;
+}
 function jsonOutput(value) {
   return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
 }

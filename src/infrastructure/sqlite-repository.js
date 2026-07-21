@@ -27,6 +27,7 @@ function taskRow(row) {
     description: row.description,
     status: row.status,
     priority: row.priority,
+    urgency: row.urgency,
     dueAt: row.due_at,
     completedAt: row.completed_at,
     author: row.author,
@@ -34,6 +35,21 @@ function taskRow(row) {
     updatedAt: row.updated_at,
     subtaskCount: row.subtask_count ?? 0,
     completedSubtaskCount: row.completed_subtask_count ?? 0
+  };
+}
+
+function ideaRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    projectId: row.project_id,
+    projectTitle: row.project_title ?? null,
+    author: row.author,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -122,11 +138,11 @@ export class SqliteRepository {
 
   createTask(task) {
     this.db.prepare(`
-      INSERT INTO tasks(id, project_id, parent_task_id, title, description, status, priority,
+      INSERT INTO tasks(id, project_id, parent_task_id, title, description, status, priority, urgency,
         due_at, completed_at, author, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(task.id, task.projectId, task.parentTaskId, task.title, task.description, task.status,
-      task.priority, task.dueAt, task.completedAt, task.author, task.createdAt, task.updatedAt);
+      task.priority, task.urgency, task.dueAt, task.completedAt, task.author, task.createdAt, task.updatedAt);
     return this.getTask(task.id);
   }
 
@@ -167,6 +183,7 @@ export class SqliteRepository {
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY
         CASE t.status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
+        CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
         CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
         CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END, t.due_at, t.created_at DESC
       LIMIT ?
@@ -202,9 +219,9 @@ export class SqliteRepository {
 
   upsertSyncedTask(task) {
     const result = this.db.prepare(`
-      INSERT INTO tasks(id, project_id, parent_task_id, title, description, status, priority,
+      INSERT INTO tasks(id, project_id, parent_task_id, title, description, status, priority, urgency,
         due_at, completed_at, author, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id,
         parent_task_id = excluded.parent_task_id,
@@ -212,13 +229,14 @@ export class SqliteRepository {
         description = excluded.description,
         status = excluded.status,
         priority = excluded.priority,
+        urgency = excluded.urgency,
         due_at = excluded.due_at,
         completed_at = excluded.completed_at,
         author = excluded.author,
         updated_at = excluded.updated_at
       WHERE excluded.updated_at > tasks.updated_at
     `).run(task.id, task.projectId, task.parentTaskId, task.title, task.description, task.status,
-      task.priority, task.dueAt, task.completedAt, task.author, task.createdAt, task.updatedAt);
+      task.priority, task.urgency, task.dueAt, task.completedAt, task.author, task.createdAt, task.updatedAt);
     return Number(result.changes);
   }
 
@@ -227,7 +245,7 @@ export class SqliteRepository {
     const params = [];
     const mapping = {
       projectId: "project_id", parentTaskId: "parent_task_id", title: "title",
-      description: "description", status: "status", priority: "priority", dueAt: "due_at",
+      description: "description", status: "status", priority: "priority", urgency: "urgency", dueAt: "due_at",
       completedAt: "completed_at"
     };
     for (const [key, column] of Object.entries(mapping)) {
@@ -241,6 +259,77 @@ export class SqliteRepository {
     params.push(changes.updatedAt, id);
     this.db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...params);
     return this.getTask(id);
+  }
+
+  createIdea(idea) {
+    this.db.prepare(`
+      INSERT INTO ideas(id, title, description, status, project_id, author, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(idea.id, idea.title, idea.description, idea.status, idea.projectId,
+      idea.author, idea.createdAt, idea.updatedAt);
+    return this.getIdea(idea.id);
+  }
+
+  getIdea(id) {
+    return ideaRow(this.db.prepare(`
+      SELECT i.*, p.title AS project_title
+      FROM ideas i LEFT JOIN projects p ON p.id = i.project_id WHERE i.id = ?
+    `).get(id));
+  }
+
+  listIdeas({ status, limit = 300 } = {}) {
+    const filter = status ? "WHERE i.status = ?" : "";
+    const params = status ? [status] : [];
+    params.push(Math.min(Math.max(Number(limit) || 300, 1), 500));
+    return this.db.prepare(`
+      SELECT i.*, p.title AS project_title
+      FROM ideas i LEFT JOIN projects p ON p.id = i.project_id
+      ${filter}
+      ORDER BY CASE i.status WHEN 'new' THEN 0 WHEN 'planned' THEN 1 WHEN 'converted' THEN 2 ELSE 3 END,
+        i.updated_at DESC LIMIT ?
+    `).all(...params).map(ideaRow);
+  }
+
+  listIdeasChangedSince(since) {
+    return this.db.prepare(`
+      SELECT i.*, p.title AS project_title
+      FROM ideas i LEFT JOIN projects p ON p.id = i.project_id
+      WHERE i.updated_at > ? ORDER BY i.updated_at
+    `).all(since).map(ideaRow);
+  }
+
+  upsertSyncedIdea(idea) {
+    const result = this.db.prepare(`
+      INSERT INTO ideas(id, title, description, status, project_id, author, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        status = excluded.status,
+        project_id = excluded.project_id,
+        author = excluded.author,
+        updated_at = excluded.updated_at
+      WHERE excluded.updated_at > ideas.updated_at
+    `).run(idea.id, idea.title, idea.description, idea.status, idea.projectId,
+      idea.author, idea.createdAt, idea.updatedAt);
+    return Number(result.changes);
+  }
+
+  updateIdea(id, changes) {
+    const fields = [];
+    const params = [];
+    const mapping = { title: "title", description: "description", status: "status", projectId: "project_id" };
+    for (const [key, column] of Object.entries(mapping)) {
+      if (changes[key] !== undefined) {
+        fields.push(`${column} = ?`);
+        params.push(changes[key]);
+      }
+    }
+    if (!fields.length) return this.getIdea(id);
+    fields.push("updated_at = ?");
+    params.push(changes.updatedAt, id);
+    this.db.prepare(`UPDATE ideas SET ${fields.join(", ")} WHERE id = ?`).run(...params);
+    return this.getIdea(id);
   }
 
   addDialogue(message) {
@@ -295,6 +384,7 @@ export class SqliteRepository {
       FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
       WHERE t.status NOT IN ('done','cancelled') AND t.due_at <= ?
       ORDER BY CASE WHEN t.due_at < ? THEN 0 ELSE 1 END,
+        CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
         CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, t.due_at
       LIMIT 20
     `).all(endOfDay, now).map(taskRow);
@@ -325,8 +415,11 @@ export class SqliteRepository {
       UNION ALL
       SELECT kind, id, title, content, updated_at FROM knowledge_items
       WHERE title LIKE ? OR content LIKE ?
+      UNION ALL
+      SELECT 'idea', id, title, description, updated_at FROM ideas
+      WHERE title LIKE ? OR description LIKE ?
       ORDER BY changed_at DESC LIMIT ?
-    `).all(pattern, pattern, pattern, pattern, pattern, pattern, pattern,
+    `).all(pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
       Math.min(Math.max(Number(limit) || 50, 1), 100)).map(row => ({
         type: row.type, id: row.id, title: row.title, snippet: row.snippet, changedAt: row.changed_at
       }));
