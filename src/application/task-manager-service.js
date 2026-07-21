@@ -1,6 +1,6 @@
 import {
-  nowIso, oneOf, optionalIsoDate, optionalText, PROJECT_STATUSES,
-  requireText, TASK_PRIORITIES, TASK_STATUSES
+  IDEA_STATUSES, nowIso, oneOf, optionalText, PROJECT_STATUSES,
+  requireText, TASK_PRIORITIES, TASK_STATUSES, taskTiming
 } from "../domain/model.js";
 import { NotFoundError, ValidationError } from "../domain/errors.js";
 
@@ -72,6 +72,7 @@ export class TaskManagerService {
 
   createTask(input) {
     const timestamp = nowIso(this.clock);
+    const timing = taskTiming({ urgency: input.urgency, dueAt: input.dueAt, clock: this.clock });
     const projectId = input.projectId || null;
     const parentTaskId = input.parentTaskId || null;
     if (projectId && !this.repository.getProject(projectId)) throw new NotFoundError("Проект", projectId);
@@ -84,7 +85,8 @@ export class TaskManagerService {
       description: optionalText(input.description),
       status: oneOf(input.status, TASK_STATUSES, "Статус", "todo"),
       priority: oneOf(input.priority, TASK_PRIORITIES, "Приоритет", "normal"),
-      dueAt: optionalIsoDate(input.dueAt),
+      urgency: timing.urgency,
+      dueAt: timing.dueAt,
       completedAt: input.status === "done" ? timestamp : null,
       author: this.author,
       createdAt: timestamp,
@@ -116,7 +118,15 @@ export class TaskManagerService {
     if (input.title !== undefined) changes.title = requireText(input.title, "Название задачи", 300);
     if (input.description !== undefined) changes.description = optionalText(input.description);
     if (input.priority !== undefined) changes.priority = oneOf(input.priority, TASK_PRIORITIES, "Приоритет");
-    if (input.dueAt !== undefined) changes.dueAt = optionalIsoDate(input.dueAt);
+    if (input.dueAt !== undefined || input.urgency !== undefined) {
+      const timing = taskTiming({
+        urgency: input.urgency ?? current.urgency,
+        dueAt: input.dueAt !== undefined ? input.dueAt : current.dueAt,
+        clock: this.clock
+      });
+      changes.urgency = timing.urgency;
+      changes.dueAt = timing.dueAt;
+    }
     if (input.status !== undefined) {
       changes.status = oneOf(input.status, TASK_STATUSES, "Статус");
       changes.completedAt = changes.status === "done" ? changes.updatedAt : null;
@@ -133,6 +143,7 @@ export class TaskManagerService {
 
   listProjects(filter) { return this.repository.listProjects(filter); }
   listTasks(filter) { return this.repository.listTasks(filter); }
+  listIdeas(filter) { return this.repository.listIdeas(filter); }
   listDialogues(limit) { return this.repository.listDialogues(limit); }
   listActivity(limit) { return this.repository.listActivity(limit); }
   search(query) {
@@ -146,6 +157,7 @@ export class TaskManagerService {
       dashboard: this.dashboard(),
       projects: this.listProjects(),
       tasks: this.listTasks({ limit: 300 }),
+      ideas: this.listIdeas({ limit: 300 }),
       dialogues: this.listDialogues(80),
       activity: this.listActivity(40)
     };
@@ -164,11 +176,22 @@ export class TaskManagerService {
         break;
       }
       case "create_task": {
-        data = this.createTask({ ...analysis.parameters, projectId: context.projectId || null });
+        let projectId = context.projectId || null;
+        if (!projectId && analysis.parameters.projectTitle) {
+          const project = this.repository.findProjectByTitle(analysis.parameters.projectTitle)
+            || this.createProject({ title: analysis.parameters.projectTitle });
+          projectId = project.id;
+        }
+        data = this.createTask({ ...analysis.parameters, projectId });
         const deadline = data.dueAt
           ? ` Срок — ${new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(data.dueAt))}.`
           : "";
         response = `Задача «${data.title}» добавлена.${deadline}`;
+        break;
+      }
+      case "create_idea": {
+        data = this.createIdea(analysis.parameters);
+        response = `Идея «${data.title}» сохранена на будущее.`;
         break;
       }
       case "complete_task": {
@@ -193,7 +216,7 @@ export class TaskManagerService {
         break;
       }
       default:
-        response = "Я сохранил сообщение в истории. Сейчас я понимаю команды создания проектов и задач, завершения задач, поиска и плана на сегодня.";
+        response = "Я сохранил сообщение в истории. Могу распределить мысли по задачам, проектам с подзадачами и идеям на будущее.";
     }
 
     const timestamp = nowIso(this.clock);
@@ -210,6 +233,49 @@ export class TaskManagerService {
       this.activity("dialogue", null, "processed", { intent: analysis.intent, confidence: analysis.confidence });
     });
     return { response, ...result };
+  }
+
+  createIdea(input) {
+    const timestamp = nowIso(this.clock);
+    const projectId = input.projectId || null;
+    if (projectId && !this.repository.getProject(projectId)) throw new NotFoundError("Проект", projectId);
+    const idea = {
+      id: this.repository.newId(),
+      title: requireText(input.title, "Название идеи", 300),
+      description: optionalText(input.description),
+      status: oneOf(input.status, IDEA_STATUSES, "Статус идеи", "new"),
+      projectId,
+      author: this.author,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    const created = this.repository.transaction(() => {
+      const result = this.repository.createIdea(idea);
+      this.activity("idea", idea.id, "created", { title: idea.title });
+      return result;
+    });
+    this.notifyChanged("idea", idea.id, "created");
+    return created;
+  }
+
+  updateIdea(id, input) {
+    const current = this.repository.getIdea(id);
+    if (!current) throw new NotFoundError("Идея", id);
+    const changes = { updatedAt: nowIso(this.clock) };
+    if (input.title !== undefined) changes.title = requireText(input.title, "Название идеи", 300);
+    if (input.description !== undefined) changes.description = optionalText(input.description);
+    if (input.status !== undefined) changes.status = oneOf(input.status, IDEA_STATUSES, "Статус идеи");
+    if (input.projectId !== undefined) {
+      if (input.projectId && !this.repository.getProject(input.projectId)) throw new NotFoundError("Проект", input.projectId);
+      changes.projectId = input.projectId || null;
+    }
+    const updated = this.repository.transaction(() => {
+      const result = this.repository.updateIdea(id, changes);
+      this.activity("idea", id, "updated", changes);
+      return result;
+    });
+    this.notifyChanged("idea", id, "updated");
+    return updated;
   }
 
   activity(entityType, entityId, action, details) {

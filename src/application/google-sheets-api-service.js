@@ -6,10 +6,13 @@ import { DomainError } from "../domain/errors.js";
 const API = "https://sheets.googleapis.com/v4/spreadsheets";
 const EPOCH = "1970-01-01T00:00:00.000Z";
 const PROJECT_HEADERS = ["id", "title", "description", "status", "color", "author", "createdAt", "updatedAt", "source", "syncHash"];
-const TASK_HEADERS = ["id", "projectId", "projectTitle", "parentTaskId", "title", "description", "status", "priority", "dueAt", "completedAt", "author", "createdAt", "updatedAt", "source", "syncHash"];
+const TASK_HEADERS = ["id", "projectId", "projectTitle", "parentTaskId", "title", "description", "status", "priority", "urgency", "dueAt", "completedAt", "author", "createdAt", "updatedAt", "source", "syncHash"];
+const IDEA_HEADERS = ["id", "title", "description", "status", "projectId", "projectTitle", "author", "createdAt", "updatedAt", "source", "syncHash"];
 const PROJECT_STATUSES = ["active", "paused", "completed", "archived"];
 const TASK_STATUSES = ["todo", "in_progress", "done", "cancelled"];
 const PRIORITIES = ["low", "normal", "high", "urgent"];
+const URGENCIES = ["urgent", "medium", "not_urgent"];
+const IDEA_STATUSES = ["new", "planned", "converted", "archived"];
 
 export class GoogleSheetsApiService {
   constructor({ config, oauth, syncService, fetchImpl = fetch, clock = () => new Date(), logger }) {
@@ -39,7 +42,8 @@ export class GoogleSheetsApiService {
         sheets: [
           { properties: { title: "Instructions", index: 0 } },
           { properties: { title: "Projects", index: 1 } },
-          { properties: { title: "Tasks", index: 2 } }
+          { properties: { title: "Tasks", index: 2 } },
+          { properties: { title: "Ideas", index: 3 } }
         ]
       }
     });
@@ -77,20 +81,28 @@ export class GoogleSheetsApiService {
     const spreadsheetId = spreadsheet.spreadsheetId;
     const params = new URLSearchParams();
     params.append("ranges", "Projects!A2:J");
-    params.append("ranges", "Tasks!A2:O");
+    params.append("ranges", "Tasks!A2:P");
+    params.append("ranges", "Ideas!A2:K");
     params.set("majorDimension", "ROWS");
     const response = await this.request(`/${encodeURIComponent(spreadsheetId)}/values:batchGet?${params}`, { method: "GET" });
     const projectRows = response.valueRanges?.[0]?.values || [];
     const taskRows = response.valueRanges?.[1]?.values || [];
-    const normalized = this.normalizeRemote(projectRows, taskRows);
-    this.syncService.push({ deviceId: "google-oauth-sheets", projects: normalized.projects, tasks: normalized.tasks });
+    const ideaRows = response.valueRanges?.[2]?.values || [];
+    const normalized = this.normalizeRemote(projectRows, taskRows, ideaRows);
+    this.syncService.push({
+      deviceId: "google-oauth-sheets",
+      projects: normalized.projects,
+      tasks: normalized.tasks,
+      ideas: normalized.ideas
+    });
     const snapshot = this.syncService.pull(EPOCH);
     const projectTitles = new Map(snapshot.projects.map(project => [project.id, project.title]));
     const projects = snapshot.projects.map(project => this.projectRow(project));
     const tasks = snapshot.tasks.map(task => this.taskRow(task, projectTitles));
+    const ideas = snapshot.ideas.map(idea => this.ideaRow(idea, projectTitles));
 
     await this.request(`/${encodeURIComponent(spreadsheetId)}/values:batchClear`, {
-      method: "POST", body: { ranges: ["Projects!A2:J", "Tasks!A2:O"] }
+      method: "POST", body: { ranges: ["Projects!A2:J", "Tasks!A2:P", "Ideas!A2:K"] }
     });
     await this.request(`/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`, {
       method: "POST",
@@ -98,7 +110,8 @@ export class GoogleSheetsApiService {
         valueInputOption: "RAW",
         data: [
           { range: "Projects!A2:J", majorDimension: "ROWS", values: projects },
-          { range: "Tasks!A2:O", majorDimension: "ROWS", values: tasks }
+          { range: "Tasks!A2:P", majorDimension: "ROWS", values: tasks },
+          { range: "Ideas!A2:K", majorDimension: "ROWS", values: ideas }
         ]
       }
     });
@@ -107,17 +120,19 @@ export class GoogleSheetsApiService {
       serverTime: this.clock().toISOString(),
       projects: projects.length,
       tasks: tasks.length,
+      ideas: ideas.length,
       spreadsheet
     };
-    this.logger.info("google-sheets.oauth-synchronized", { reason, projects: result.projects, tasks: result.tasks });
+    this.logger.info("google-sheets.oauth-synchronized", { reason, projects: result.projects, tasks: result.tasks, ideas: result.ideas });
     return result;
   }
 
-  normalizeRemote(projectRows, taskRows) {
+  normalizeRemote(projectRows, taskRows, ideaRows = []) {
     const projects = projectRows.map(row => this.normalizeProject(this.rowObject(PROJECT_HEADERS, row))).filter(item => item.title);
     const byId = new Map(projects.map(item => [item.id, item]));
     const byTitle = new Map(projects.map(item => [item.title.toLocaleLowerCase("ru-RU"), item]));
     const tasks = taskRows.map(row => this.normalizeTask(this.rowObject(TASK_HEADERS, row))).filter(item => item.title);
+    const ideas = ideaRows.map(row => this.normalizeIdea(this.rowObject(IDEA_HEADERS, row))).filter(item => item.title);
 
     for (const task of tasks) {
       const projectTitle = String(task.projectTitle || "").trim();
@@ -137,7 +152,13 @@ export class GoogleSheetsApiService {
     const taskIds = new Set(tasks.map(task => task.id));
     for (const task of tasks) if (task.parentTaskId && !taskIds.has(task.parentTaskId)) task.parentTaskId = null;
     tasks.sort((left, right) => Number(Boolean(left.parentTaskId)) - Number(Boolean(right.parentTaskId)));
-    return { projects, tasks };
+    for (const idea of ideas) {
+      const projectTitle = String(idea.projectTitle || "").trim();
+      if (!idea.projectId && projectTitle) idea.projectId = byTitle.get(projectTitle.toLocaleLowerCase("ru-RU"))?.id || null;
+      if (idea.projectId && !byId.has(idea.projectId)) idea.projectId = null;
+      delete idea.projectTitle;
+    }
+    return { projects, tasks, ideas };
   }
 
   normalizeProject(raw) {
@@ -175,6 +196,7 @@ export class GoogleSheetsApiService {
       description: this.nullable(raw.description),
       status: TASK_STATUSES.includes(raw.status) ? raw.status : "todo",
       priority: PRIORITIES.includes(raw.priority) ? raw.priority : "normal",
+      urgency: URGENCIES.includes(raw.urgency) ? raw.urgency : this.urgencyFromDate(raw.dueAt),
       dueAt: this.nullableIso(raw.dueAt),
       completedAt: this.nullableIso(raw.completedAt),
       author: this.text(raw.author) || "ChatGPT",
@@ -193,6 +215,28 @@ export class GoogleSheetsApiService {
     delete task.syncHash;
     delete task.source;
     return task;
+  }
+
+  normalizeIdea(raw) {
+    const now = this.clock().toISOString();
+    const idea = {
+      id: this.uuid(raw.id),
+      title: this.text(raw.title),
+      description: this.nullable(raw.description),
+      status: IDEA_STATUSES.includes(raw.status) ? raw.status : "new",
+      projectId: this.nullable(raw.projectId),
+      projectTitle: this.nullable(raw.projectTitle),
+      author: this.text(raw.author) || "ChatGPT",
+      createdAt: this.iso(raw.createdAt, now),
+      updatedAt: this.iso(raw.updatedAt, now),
+      source: this.text(raw.source) || "Google Sheets",
+      syncHash: this.text(raw.syncHash)
+    };
+    const hash = this.hash(idea, "idea");
+    if (idea.syncHash && idea.syncHash !== hash) idea.updatedAt = now;
+    delete idea.syncHash;
+    delete idea.source;
+    return idea;
   }
 
   projectRow(project) {
@@ -214,8 +258,20 @@ export class GoogleSheetsApiService {
     return TASK_HEADERS.map(header => value[header] ?? "");
   }
 
+  ideaRow(idea, projectTitles) {
+    const value = {
+      ...idea,
+      projectTitle: idea.projectId ? projectTitles.get(idea.projectId) || "" : "",
+      source: idea.author || "Orbita"
+    };
+    value.syncHash = this.hash(value, "idea");
+    return IDEA_HEADERS.map(header => value[header] ?? "");
+  }
+
   hash(item, kind) {
-    const fields = kind === "project" ? PROJECT_HEADERS.slice(0, -1) : TASK_HEADERS.slice(0, -1);
+    const fields = kind === "project"
+      ? PROJECT_HEADERS.slice(0, -1)
+      : kind === "idea" ? IDEA_HEADERS.slice(0, -1) : TASK_HEADERS.slice(0, -1);
     const serialized = fields.map(field => item[field] == null ? "" : String(item[field])).join("\u001f");
     return createHash("sha256").update(serialized).digest("base64url");
   }
@@ -227,27 +283,46 @@ export class GoogleSheetsApiService {
       sheets = current.sheets || [];
     }
     const names = new Set(sheets.map(sheet => sheet.properties?.title));
-    const requests = ["Instructions", "Projects", "Tasks"]
+    const requests = ["Instructions", "Projects", "Tasks", "Ideas"]
       .filter(title => !names.has(title))
       .map(title => ({ addSheet: { properties: { title } } }));
     if (requests.length) await this.request(`/${encodeURIComponent(spreadsheetId)}:batchUpdate`, { method: "POST", body: { requests } });
+    await this.migrateTaskHeaders(spreadsheetId);
     await this.request(`/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`, {
       method: "POST",
       body: {
         valueInputOption: "RAW",
         data: [
-          { range: "Instructions!A1:A6", values: [
+          { range: "Instructions!A1:A10", values: [
             ["ОРБИТА — единый реестр задач"],
-            ["Projects хранит проекты, Tasks — задачи."],
+            ["Projects хранит проекты, Tasks — задачи и подзадачи, Ideas — идеи на будущее."],
             ["Изменения Windows, Android и ChatGPT объединяются по updatedAt."],
             ["Не удаляйте строки: используйте cancelled и archived."],
             ["Технические поля id, createdAt и syncHash изменять не следует."],
-            ["Не храните в задачах пароли, ключи и другие секреты."]
+            ["Срочность Tasks: urgent — сегодня, medium — завтра, not_urgent — конкретная более поздняя дата."],
+            ["Срочная задача должна иметь dueAt; по истечении dueAt Орбита показывает уведомление Windows."],
+            ["Мысль с конкретным действием записывайте в Tasks; результат из нескольких шагов — в Projects и связанные Tasks."],
+            ["Мысль без обязательства и срока записывайте в Ideas, а не в Tasks."],
+            ["Не храните в таблице пароли, ключи и другие секреты."]
           ] },
           { range: "Projects!A1:J1", values: [PROJECT_HEADERS] },
-          { range: "Tasks!A1:O1", values: [TASK_HEADERS] }
+          { range: "Tasks!A1:P1", values: [TASK_HEADERS] },
+          { range: "Ideas!A1:K1", values: [IDEA_HEADERS] }
         ]
       }
+    });
+  }
+
+  async migrateTaskHeaders(spreadsheetId) {
+    const response = await this.request(`/${encodeURIComponent(spreadsheetId)}/values/Tasks!A1:P1`, { method: "GET" });
+    const headers = response.values?.[0] || [];
+    if (!headers.length || headers.includes("urgency") || !headers.includes("dueAt")) return;
+    const metadata = await this.request(`/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`, { method: "GET" });
+    const taskSheetId = metadata.sheets?.find(sheet => sheet.properties?.title === "Tasks")?.properties?.sheetId;
+    if (taskSheetId === undefined) return;
+    await this.request(`/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+      method: "POST",
+      body: { requests: [{ insertDimension: { range: { sheetId: taskSheetId, dimension: "COLUMNS", startIndex: 8, endIndex: 9 }, inheritFromBefore: true } }] }
     });
   }
 
@@ -299,4 +374,14 @@ export class GoogleSheetsApiService {
   nullable(value) { const text = this.text(value); return text || null; }
   iso(value, fallback) { const date = new Date(value || ""); return Number.isNaN(date.valueOf()) ? fallback : date.toISOString(); }
   nullableIso(value) { return this.text(value) ? this.iso(value, null) : null; }
+  urgencyFromDate(value) {
+    if (!this.text(value)) return "not_urgent";
+    const now = new Date(this.clock());
+    const due = new Date(value);
+    if (Number.isNaN(due.valueOf())) return "not_urgent";
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    const difference = Math.round((dueDay - today) / 86_400_000);
+    return difference <= 0 ? "urgent" : difference === 1 ? "medium" : "not_urgent";
+  }
 }

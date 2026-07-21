@@ -81,6 +81,35 @@ const MIGRATIONS = [
         updated_at TEXT NOT NULL
       );
     `
+  },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE tasks ADD COLUMN urgency TEXT NOT NULL DEFAULT 'not_urgent'
+        CHECK(urgency IN ('urgent','medium','not_urgent'));
+
+      UPDATE tasks SET urgency = CASE
+        WHEN due_at IS NULL THEN 'not_urgent'
+        WHEN date(due_at, 'localtime') <= date('now', 'localtime') THEN 'urgent'
+        WHEN date(due_at, 'localtime') = date('now', 'localtime', '+1 day') THEN 'medium'
+        ELSE 'not_urgent'
+      END;
+
+      CREATE INDEX IF NOT EXISTS idx_tasks_urgency_due ON tasks(urgency, due_at);
+
+      CREATE TABLE IF NOT EXISTS ideas (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL CHECK(status IN ('new','planned','converted','archived')),
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        author TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ideas_status_updated ON ideas(status, updated_at DESC);
+    `
   }
 ];
 

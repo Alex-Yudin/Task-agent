@@ -81,6 +81,7 @@ button { cursor: pointer; }
 .panel { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper); box-shadow: 0 7px 30px rgba(31,29,53,.035); }
 .task-list { display: grid; gap: 2px; }
 .task-item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 5px; border-bottom: 1px solid #f0eef3; }
+.task-item.urgent-task { margin: 2px 0; padding-left: 10px; border-left: 4px solid var(--red); border-radius: 9px; background: #fff4f6; }
 .task-item:last-child { border-bottom: 0; }
 .task-check { width: 18px; height: 18px; border: 1.5px solid #c9c6d2; border-radius: 6px; background: #fff; }
 .task-check:hover { border-color: var(--accent); background: var(--accent-soft); }
@@ -92,6 +93,9 @@ button { cursor: pointer; }
 .priority.urgent { background: var(--red); }
 .priority.high { background: var(--orange); }
 .priority.low { background: var(--teal); }
+.urgency-pill { display: inline-flex; align-items: center; border-radius: 99px; padding: 2px 6px; color: #686574; background: #f0eef3; font-size: 8px; font-weight: 700; }
+.urgency-pill.urgent { color: #9b1c31; background: #fce8ec; }
+.urgency-pill.medium { color: #8a570d; background: #fff1d6; }
 .task-actions { display: flex; align-items: center; gap: 5px; }
 .mini-button { border: 0; border-radius: 7px; padding: 5px 7px; color: var(--muted); background: transparent; font-size: 10px; }
 .mini-button:hover { color: var(--accent); background: var(--accent-soft); }
@@ -130,6 +134,8 @@ button { cursor: pointer; }
 .task-table-head { padding: 11px 16px; color: var(--muted); background: #faf9fc; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .task-table-row { min-height: 58px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 11px; }
 .task-table-row:hover { background: #fcfbfe; }
+.task-table-row.urgent-task { border-left: 4px solid var(--red); background: #fff4f6; }
+.task-table-row.urgent-task:hover { background: #fcecef; }
 .project-tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .empty-state { display: grid; place-items: center; min-height: 210px; padding: 40px; color: var(--muted); text-align: center; }
 .empty-state span { display: block; margin-bottom: 12px; color: #c0bccb; font-size: 38px; }
@@ -146,6 +152,19 @@ button { cursor: pointer; }
 .search-result h3 { margin: 7px 0 5px; font-size: 12px; }
 .search-result p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .type-pill { color: var(--accent); background: var(--accent-soft); }
+
+.page-title { margin: 0; font: 500 20px Georgia, "Times New Roman", serif; }
+.idea-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.idea-card { min-height: 175px; padding: 18px; border: 1px solid #e4def9; border-radius: 15px; background: linear-gradient(145deg, #fff 0%, #faf8ff 100%); box-shadow: 0 7px 24px rgba(70,54,130,.04); }
+.idea-card-head { display: flex; align-items: center; justify-content: space-between; }
+.idea-icon { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 10px; color: #725ecb; background: #eee9ff; }
+.idea-card h3 { margin: 16px 0 8px; font: 500 17px Georgia, "Times New Roman", serif; }
+.idea-card p { min-height: 42px; margin: 0 0 15px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.idea-card small { color: #9793a4; font-size: 9px; }
+.status-pill.new { color: #5c49b0; background: #eee9ff; }
+.status-pill.planned { color: #8a570d; background: #fff1d6; }
+.status-pill.converted { color: #277a5c; background: #e7f6f0; }
+.status-pill.archived { color: #777589; background: #f0eef3; }
 
 .assistant-panel { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: #fff; }
 .assistant-head { display: flex; align-items: center; gap: 11px; min-height: 82px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
@@ -196,4 +215,5 @@ button { cursor: pointer; }
   .content, .topbar { padding-left: 24px; padding-right: 24px; }
   .global-search { width: 190px; }
   .project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .idea-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

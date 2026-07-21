@@ -125,7 +125,7 @@ async function handleApi(request, response, url) {
 
   if (method === "GET" && pathname === "/api/health") {
     return sendJson(response, 200, {
-      status: "ok", version: "0.4.4", storage: "sqlite", androidSync: Boolean(sync),
+      status: "ok", version: "0.5.0", storage: "sqlite", androidSync: Boolean(sync),
       googleSheets: googleSheetsSync.status()
     });
   }
@@ -150,6 +150,16 @@ async function handleApi(request, response, url) {
   }
   if (method === "POST" && pathname === "/api/tasks") {
     return sendJson(response, 201, service.createTask(await readJson(request)));
+  }
+  if (method === "GET" && pathname === "/api/ideas") {
+    return sendJson(response, 200, service.listIdeas({ status: url.searchParams.get("status") || undefined }));
+  }
+  if (method === "POST" && pathname === "/api/ideas") {
+    return sendJson(response, 201, service.createIdea(await readJson(request)));
+  }
+  const ideaMatch = pathname.match(/^\/api\/ideas\/([0-9a-f-]+)$/iu);
+  if (method === "PATCH" && ideaMatch) {
+    return sendJson(response, 200, service.updateIdea(ideaMatch[1], await readJson(request)));
   }
   const taskMatch = pathname.match(/^\/api\/tasks\/([0-9a-f-]+)$/iu);
   if (method === "PATCH" && taskMatch) {

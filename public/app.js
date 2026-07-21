@@ -1,5 +1,5 @@
 const state = {
-  data: { dashboard: { stats: {}, today: [] }, projects: [], tasks: [], dialogues: [], activity: [] },
+  data: { dashboard: { stats: {}, today: [] }, projects: [], tasks: [], ideas: [], dialogues: [], activity: [] },
   view: "dashboard",
   taskFilter: "open",
   projectFilter: "all",
@@ -21,6 +21,9 @@ const elements = {
   taskForm: document.querySelector("#taskForm"),
   projectDialog: document.querySelector("#projectDialog"),
   projectForm: document.querySelector("#projectForm"),
+  ideaDialog: document.querySelector("#ideaDialog"),
+  ideaForm: document.querySelector("#ideaForm"),
+  notificationsButton: document.querySelector("#notificationsButton"),
   googleSheetsState: document.querySelector("#googleSheetsState"),
   googleDialog: document.querySelector("#googleDialog"),
   googleAccountStatus: document.querySelector("#googleAccountStatus"),
@@ -32,7 +35,9 @@ const elements = {
 const labels = {
   status: { todo: "К выполнению", in_progress: "В работе", done: "Выполнена", cancelled: "Отменена" },
   priority: { low: "Низкий", normal: "Обычный", high: "Высокий", urgent: "Срочный" },
-  type: { project: "Проект", task: "Задача", dialogue: "Диалог", context: "Контекст", document: "Документ", contact: "Контакт", event: "Событие", decision: "Решение", reminder: "Напоминание", source: "Источник" },
+  urgency: { urgent: "Срочная · сегодня", medium: "Среднесрочная · завтра", not_urgent: "Несрочная" },
+  ideaStatus: { new: "Новая", planned: "Запланирована", converted: "Преобразована", archived: "Архив" },
+  type: { project: "Проект", task: "Задача", idea: "Идея", dialogue: "Диалог", context: "Контекст", document: "Документ", contact: "Контакт", event: "Событие", decision: "Решение", reminder: "Напоминание", source: "Источник" },
   action: { created: "Создано", updated: "Изменено", processed: "Обработан диалог" }
 };
 
@@ -76,6 +81,7 @@ async function refresh() {
   state.data = await api("/api/bootstrap");
   refreshGoogleSheetsStatus();
   populateProjectSelect();
+  checkDeadlineNotifications(state.data.tasks);
   renderChat();
   render();
 }
@@ -135,12 +141,13 @@ function setHeader(title) {
 
 function taskItem(task, compact = false) {
   return `
-    <div class="task-item" data-task-id="${task.id}">
+    <div class="task-item ${task.urgency === "urgent" && !["done", "cancelled"].includes(task.status) ? "urgent-task" : ""}" data-task-id="${task.id}">
       <button class="task-check" data-action="toggle-task" aria-label="Отметить задачу выполненной"></button>
       <div>
         <div class="task-title ${task.status === "done" ? "done" : ""}">${escapeHtml(task.title)}</div>
         <div class="task-meta">
           <span class="priority ${task.priority}"></span>
+          <span class="urgency-pill ${task.urgency}">${labels.urgency[task.urgency] || labels.urgency.not_urgent}</span>
           <span>${escapeHtml(task.projectTitle || "Без проекта")}</span>
           <span class="task-due ${isOverdue(task) ? "overdue" : ""}">${isOverdue(task) ? "Просрочено · " : ""}${formatDate(task.dueAt)}</span>
           ${task.subtaskCount ? `<span>${task.completedSubtaskCount}/${task.subtaskCount} подзадач</span>` : ""}
@@ -248,9 +255,9 @@ function renderTasks() {
 
 function taskTableRow(task) {
   const isChild = Boolean(task.parentTaskId);
-  return `<div class="task-table-row" data-task-id="${task.id}">
+  return `<div class="task-table-row ${task.urgency === "urgent" && !["done", "cancelled"].includes(task.status) ? "urgent-task" : ""}" data-task-id="${task.id}">
     <button class="task-check" data-action="toggle-task" aria-label="Изменить статус"></button>
-    <div><div class="task-title ${task.status === "done" ? "done" : ""}" style="padding-left:${isChild ? 18 : 0}px">${isChild ? "↳ " : ""}${escapeHtml(task.title)}</div><div class="task-meta"><span class="priority ${task.priority}"></span>${labels.priority[task.priority]}${task.subtaskCount ? ` · ${task.completedSubtaskCount}/${task.subtaskCount} подзадач` : ""}</div></div>
+    <div><div class="task-title ${task.status === "done" ? "done" : ""}" style="padding-left:${isChild ? 18 : 0}px">${isChild ? "↳ " : ""}${escapeHtml(task.title)}</div><div class="task-meta"><span class="priority ${task.priority}"></span>${labels.priority[task.priority]}<span class="urgency-pill ${task.urgency}">${labels.urgency[task.urgency] || labels.urgency.not_urgent}</span>${task.subtaskCount ? ` · ${task.completedSubtaskCount}/${task.subtaskCount} подзадач` : ""}</div></div>
     <span class="project-tag">${escapeHtml(task.projectTitle || "Без проекта")}</span>
     <span class="task-due ${isOverdue(task) ? "overdue" : ""}">${formatDate(task.dueAt)}</span>
     <span><span class="status-pill ${task.status}">${labels.status[task.status]}</span></span>
@@ -266,6 +273,26 @@ function renderHistory() {
     <div class="timeline">${activity.length ? activity.map(activityItem).join("") : emptyState("История пока пуста", "Здесь появятся созданные проекты, задачи и команды.")}</div>`;
 }
 
+function renderIdeas() {
+  setHeader("Идеи на будущее");
+  const ideas = state.data.ideas || [];
+  elements.content.innerHTML = `
+    <div class="page-toolbar">
+      <div><p class="eyebrow">БАНК ИДЕЙ</p><h2 class="page-title">Мысли без обязательного срока</h2></div>
+      <button class="primary-button" data-action="new-idea"><span>＋</span>Новая идея</button>
+    </div>
+    <div class="idea-grid">${ideas.length ? ideas.map(ideaCard).join("") : emptyState("Идей пока нет", "Напишите Орбите: «Идея на будущее: …»")}</div>`;
+}
+
+function ideaCard(idea) {
+  return `<article class="idea-card">
+    <div class="idea-card-head"><span class="idea-icon">✦</span><span class="status-pill ${idea.status}">${labels.ideaStatus[idea.status] || idea.status}</span></div>
+    <h3>${escapeHtml(idea.title)}</h3>
+    <p>${escapeHtml(idea.description || "Описание можно дополнить позже.")}</p>
+    <small>${escapeHtml(idea.projectTitle || "Без проекта")} · ${formatDate(idea.updatedAt)}</small>
+  </article>`;
+}
+
 function activityItem(item) {
   const subject = item.details?.title || item.details?.intent || item.entityType;
   return `<article class="timeline-item"><span class="timeline-icon">${item.action === "created" ? "+" : item.action === "processed" ? "◷" : "↻"}</span><div><strong>${labels.action[item.action] || item.action}</strong><p>${escapeHtml(subject)}</p></div><time>${formatDate(item.createdAt, { time: true })}</time></article>`;
@@ -279,7 +306,7 @@ function renderSearch(results, query) {
 
 function renderChat() {
   const messages = state.data.dialogues;
-  const intro = `<div class="message assistant">Здравствуйте. Я могу создать проект или задачу, завершить задачу, найти обсуждение и собрать план на сегодня.<time>локальный режим</time></div>`;
+  const intro = `<div class="message assistant">Здравствуйте. Я распределяю мысли по задачам, проектам с подзадачами и идеям на будущее. Срок сегодня считаю срочным, завтра — среднесрочным.<time>локальный режим</time></div>`;
   elements.chatMessages.innerHTML = intro + messages.map(message => `<div class="message ${message.role === "user" ? "user" : "assistant"}">${escapeHtml(message.content)}<time>${formatDate(message.createdAt, { time: true })}</time></div>`).join("");
   elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
 }
@@ -288,6 +315,7 @@ function render() {
   document.querySelectorAll(".nav-item").forEach(button => button.classList.toggle("active", button.dataset.view === state.view));
   if (state.view === "projects") renderProjects();
   else if (state.view === "tasks") renderTasks();
+  else if (state.view === "ideas") renderIdeas();
   else if (state.view === "history") renderHistory();
   else renderDashboard();
 }
@@ -314,16 +342,31 @@ function projectStatus(status) {
 }
 
 function populateProjectSelect() {
-  const select = elements.taskForm.elements.projectId;
-  const current = select.value;
-  select.innerHTML = `<option value="">Без проекта</option>${state.data.projects.filter(project => project.status === "active").map(project => `<option value="${project.id}">${escapeHtml(project.title)}</option>`).join("")}`;
-  select.value = current;
+  for (const select of [elements.taskForm.elements.projectId, elements.ideaForm.elements.projectId]) {
+    const current = select.value;
+    select.innerHTML = `<option value="">Без проекта</option>${state.data.projects.filter(project => project.status === "active").map(project => `<option value="${project.id}">${escapeHtml(project.title)}</option>`).join("")}`;
+    select.value = current;
+  }
+}
+
+function localInputValue(date) {
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function defaultDeadline(dayOffset) {
+  const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
+  date.setHours(23, 59, 0, 0);
+  return localInputValue(date);
 }
 
 function openTaskDialog({ projectId = state.selectedProjectId || "", parentTaskId = "" } = {}) {
   elements.taskForm.reset();
   elements.taskForm.elements.projectId.value = projectId || "";
   elements.taskForm.elements.parentTaskId.value = parentTaskId;
+  elements.taskForm.elements.urgency.value = "urgent";
+  elements.taskForm.elements.dueAt.value = defaultDeadline(0);
   elements.taskDialog.showModal();
   setTimeout(() => elements.taskForm.elements.title.focus(), 30);
 }
@@ -334,11 +377,24 @@ async function submitTask(event) {
   const payload = Object.fromEntries(form.entries());
   payload.projectId ||= null;
   payload.parentTaskId ||= null;
+  if (payload.urgency === "not_urgent" && !payload.dueAt) return toast("Для несрочной задачи укажите конкретную дату", "error");
   payload.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
   try {
     await api("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
     elements.taskDialog.close();
     toast(payload.parentTaskId ? "Подзадача добавлена" : "Задача добавлена");
+    await refresh();
+  } catch (error) { toast(error.message, "error"); }
+}
+
+async function submitIdea(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(elements.ideaForm).entries());
+  payload.projectId ||= null;
+  try {
+    await api("/api/ideas", { method: "POST", body: JSON.stringify(payload) });
+    elements.ideaDialog.close();
+    toast("Идея сохранена на будущее");
     await refresh();
   } catch (error) { toast(error.message, "error"); }
 }
@@ -367,6 +423,11 @@ async function handleContentClick(event) {
   if (target.dataset.projectFilter) { state.projectFilter = target.dataset.projectFilter; render(); return; }
   const action = target.dataset.action;
   if (action === "new-project") elements.projectDialog.showModal();
+  if (action === "new-idea") {
+    elements.ideaForm.reset();
+    elements.ideaDialog.showModal();
+    setTimeout(() => elements.ideaForm.elements.title.focus(), 30);
+  }
   if (action === "clear-project") { state.selectedProjectId = null; render(); }
   if (action === "open-project") {
     state.selectedProjectId = target.dataset.projectId;
@@ -429,6 +490,54 @@ function configureVoice() {
   elements.voiceButton.addEventListener("click", () => recognition.start());
 }
 
+const NOTIFICATION_KEY = "orbita-deadline-notifications-v1";
+
+function notificationLog() {
+  try { return JSON.parse(localStorage.getItem(NOTIFICATION_KEY) || "{}"); }
+  catch { return {}; }
+}
+
+function refreshNotificationButton() {
+  if (!("Notification" in window)) {
+    elements.notificationsButton.textContent = "Уведомления не поддерживаются";
+    elements.notificationsButton.disabled = true;
+    return;
+  }
+  elements.notificationsButton.textContent = Notification.permission === "granted"
+    ? "Уведомления включены"
+    : Notification.permission === "denied" ? "Уведомления заблокированы" : "Включить уведомления";
+}
+
+function checkDeadlineNotifications(tasks = []) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const sent = notificationLog();
+  const now = Date.now();
+  let changed = false;
+  for (const task of tasks) {
+    if (task.urgency !== "urgent" || !task.dueAt || ["done", "cancelled"].includes(task.status)) continue;
+    const key = `${task.id}:${task.dueAt}`;
+    if (new Date(task.dueAt).valueOf() > now || sent[key]) continue;
+    new Notification("Орбита: срок срочной задачи истёк", {
+      body: `${task.title}\nСрок: ${formatDate(task.dueAt, { time: true })}`,
+      tag: `orbita-${task.id}`,
+      renotify: false
+    });
+    sent[key] = new Date().toISOString();
+    changed = true;
+  }
+  if (changed) localStorage.setItem(NOTIFICATION_KEY, JSON.stringify(sent));
+}
+
+async function enableNotifications() {
+  if (!("Notification" in window)) return toast("Этот браузер не поддерживает системные уведомления", "error");
+  const permission = await Notification.requestPermission();
+  refreshNotificationButton();
+  if (permission === "granted") {
+    toast("Уведомления о срочных задачах включены");
+    checkDeadlineNotifications(state.data.tasks);
+  } else toast("Разрешите уведомления для 127.0.0.1 в настройках браузера", "error");
+}
+
 let searchTimer;
 elements.searchInput.addEventListener("input", () => {
   clearTimeout(searchTimer);
@@ -447,6 +556,23 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
   render();
 }));
 document.querySelector("#newTaskButton").addEventListener("click", () => openTaskDialog());
+elements.notificationsButton.addEventListener("click", enableNotifications);
+elements.taskForm.elements.urgency.addEventListener("change", () => {
+  const urgency = elements.taskForm.elements.urgency.value;
+  if (urgency === "urgent") elements.taskForm.elements.dueAt.value = defaultDeadline(0);
+  if (urgency === "medium") elements.taskForm.elements.dueAt.value = defaultDeadline(1);
+  if (urgency === "not_urgent") elements.taskForm.elements.dueAt.focus();
+});
+elements.taskForm.elements.dueAt.addEventListener("change", () => {
+  const due = new Date(elements.taskForm.elements.dueAt.value);
+  if (Number.isNaN(due.valueOf())) return;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueDay = new Date(due);
+  dueDay.setHours(0, 0, 0, 0);
+  const days = Math.round((dueDay - today) / 86_400_000);
+  elements.taskForm.elements.urgency.value = days <= 0 ? "urgent" : days === 1 ? "medium" : "not_urgent";
+});
 document.querySelector("#backupButton").addEventListener("click", async () => {
   try {
     const backup = await api("/api/backups", { method: "POST" });
@@ -457,7 +583,7 @@ document.querySelector("#googleSheetsSyncButton").addEventListener("click", asyn
   try {
     toast("Синхронизация с Google Таблицей запущена");
     const status = await api("/api/google-sheets/sync", { method: "POST" });
-    toast(`Google Таблица обновлена: ${status.projects} проектов, ${status.tasks} задач`);
+    toast(`Google Таблица обновлена: ${status.projects} проектов, ${status.tasks} задач, ${status.ideas || 0} идей`);
     await refresh();
   } catch (error) { toast(error.message, "error"); }
 });
@@ -504,16 +630,23 @@ document.querySelector("#googleDisconnectButton").addEventListener("click", asyn
 document.querySelectorAll(".close-google-modal").forEach(button => button.addEventListener("click", () => elements.googleDialog.close()));
 document.querySelectorAll(".close-modal").forEach(button => button.addEventListener("click", () => elements.taskDialog.close()));
 document.querySelectorAll(".close-project-modal").forEach(button => button.addEventListener("click", () => elements.projectDialog.close()));
+document.querySelectorAll(".close-idea-modal").forEach(button => button.addEventListener("click", () => elements.ideaDialog.close()));
 document.querySelectorAll("[data-prompt]").forEach(button => button.addEventListener("click", () => sendChat(button.dataset.prompt)));
 elements.content.addEventListener("click", handleContentClick);
 elements.taskForm.addEventListener("submit", submitTask);
 elements.projectForm.addEventListener("submit", submitProject);
+elements.ideaForm.addEventListener("submit", submitIdea);
 elements.chatForm.addEventListener("submit", event => { event.preventDefault(); sendChat(elements.chatInput.value); });
 elements.chatInput.addEventListener("keydown", event => {
   if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(elements.chatInput.value); }
 });
 
 configureVoice();
+refreshNotificationButton();
+setInterval(async () => {
+  try { checkDeadlineNotifications(await api("/api/tasks?limit=500")); }
+  catch {}
+}, 30_000);
 refresh().catch(error => {
   elements.content.innerHTML = emptyState("Не удалось запустить приложение", error.message);
   toast(error.message, "error");

@@ -24,6 +24,7 @@ export class GoogleSheetsSyncService {
       lastReason: null,
       projects: 0,
       tasks: 0,
+      ideas: 0,
       mode: null
     };
     this.refreshConfigured();
@@ -76,6 +77,7 @@ export class GoogleSheetsSyncService {
         this.state.lastSuccessAt = result.serverTime || this.clock().toISOString();
         this.state.projects = result.projects;
         this.state.tasks = result.tasks;
+        this.state.ideas = result.ideas || 0;
         this.state.mode = "oauth";
         return this.status();
       }
@@ -91,7 +93,8 @@ export class GoogleSheetsSyncService {
           clientId: "orbita-windows",
           secret: credentials.secret,
           projects: snapshot.projects,
-          tasks: snapshot.tasks
+          tasks: snapshot.tasks,
+          ideas: snapshot.ideas
         }),
         signal: AbortSignal.timeout(30000)
       });
@@ -104,12 +107,14 @@ export class GoogleSheetsSyncService {
       }
       const projects = Array.isArray(remote.projects) ? remote.projects : [];
       const tasks = Array.isArray(remote.tasks) ? remote.tasks : [];
-      this.syncService.push({ deviceId: "google-sheets", projects, tasks });
+      const ideas = Array.isArray(remote.ideas) ? remote.ideas : [];
+      this.syncService.push({ deviceId: "google-sheets", projects, tasks, ideas });
       this.state.lastSuccessAt = remote.serverTime || this.clock().toISOString();
       this.state.projects = projects.length;
       this.state.tasks = tasks.length;
+      this.state.ideas = ideas.length;
       this.state.mode = "apps-script";
-      this.logger.info("google-sheets.synchronized", { reason, projects: projects.length, tasks: tasks.length });
+      this.logger.info("google-sheets.synchronized", { reason, projects: projects.length, tasks: tasks.length, ideas: ideas.length });
       return this.status();
     } catch (error) {
       this.state.lastError = error.message;
